@@ -9,6 +9,15 @@ const dir = dirname(fileURLToPath(import.meta.url));
 const src = (f) => readFileSync(join(dir, "src", f), "utf8");
 const parts = { CSS: src("app.css"), ZSTD: src("zstd.js"), CORE: src("core.js"), WORKER: src("worker-main.js"), DEMO: src("demo.js"), APP: src("app.js") };
 for (const [k, v] of Object.entries(parts)) if (k !== "CSS" && /<\/script/i.test(v)) throw new Error(`${k}: содержит </script>`);
+parts.GRAB = src("grab.js");
+
+// закладка: zstd + core + grab в одной функции; лёгкое сжатие (убираем отступы и строчные комментарии)
+const lite = (code) => code.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//")).join("\n");
+const grabCode = lite(`(()=>{\n${parts.ZSTD}\n${parts.CORE}\n${src("grab.js")}\n})();`);
+const bookmarklet = "javascript:" + grabCode.replace(/%/g, "%25").replace(/\n/g, "%0A").replace(/#/g, "%23").replace(/"/g, "%22");
+parts.BOOKMARKLET = bookmarklet.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+parts.SNIPPET = grabCode.replace(/<\/script/gi, "<\\/script");
+writeFileSync(join(dir, "raskroy-grab.js"), grabCode + "\n");
 
 let body = src("shell.html");
 for (const [k, v] of Object.entries(parts)) body = body.replace(`/*@@${k}@@*/`, () => v);
@@ -28,4 +37,4 @@ ${body}
 writeFileSync(join(dir, "raskroy.html"), full);
 const i = process.argv.indexOf("--body");
 if (i > 0) writeFileSync(process.argv[i + 1], body);
-console.log(`raskroy.html: ${(full.length / 1024).toFixed(1)} КБ`);
+console.log(`raskroy.html: ${(full.length / 1024).toFixed(1)} КБ · закладка ${(bookmarklet.length / 1024).toFixed(1)} КБ`);

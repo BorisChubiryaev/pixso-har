@@ -115,14 +115,14 @@
   function renderHeader() {
     const box = $("#filechip"); box.replaceChildren();
     if (S.demo) {
-      box.append(h("button", { class: "btn primary", onclick: () => $("#file").click() }, icon("upload"), "Открыть HAR"));
+      box.append(h("button", { class: "btn primary", onclick: () => $("#file").click() }, icon("upload"), "Открыть файл"));
       return;
     }
     const m = S.meta || {};
     box.append(
       h("div", { class: "meta mono" }, h("b", {}, S.file?.name || "файл"), h("br"),
         `${(m.nodes || 0).toLocaleString("ru-RU")} слоёв · Kiwi ${m.schema || "?"}${m.created ? " · Pixso " + m.created : ""}`),
-      h("button", { class: "btn", onclick: () => $("#file").click() }, icon("upload"), "Другой HAR"),
+      h("button", { class: "btn", onclick: () => $("#file").click() }, icon("upload"), "Другой файл"),
     );
   }
 
@@ -478,6 +478,31 @@
     addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
     addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) { $("#dropall").hidden = true; dz.classList.remove("over"); } });
     addEventListener("drop", (e) => { e.preventDefault(); depth = 0; $("#dropall").hidden = true; dz.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) takeFile(f); });
+
+    // ссылка на макет
+    const link = $("#link"), openA = $("#open-link"), hint = $("#linkhint");
+    const checkLink = () => {
+      const v = link.value.trim();
+      let ok = false, msg = "Вставьте ссылку из адресной строки Pixso или из «Копировать ссылку»", cls = "";
+      if (v) {
+        try {
+          const u = new URL(v);
+          const key = (u.pathname.match(/\/app\/design\/([^/?#]+)/) || [])[1];
+          const item = u.searchParams.get("item-id") || u.searchParams.get("node-id");
+          if (key) { ok = true; cls = "ok"; msg = `Файл ${key}${item ? " · фрейм " + item.replace("-", ":") : ""} — откройте и нажмите закладку «Раскрой ▸ Pixso»`; }
+          else { cls = "bad"; msg = "Это не ссылка на макет: нужен адрес вида …/app/design/<файл>"; }
+        } catch (_) { cls = "bad"; msg = "Не похоже на ссылку"; }
+      }
+      openA.setAttribute("aria-disabled", String(!ok));
+      openA.href = ok ? v : "#";
+      hint.textContent = msg; hint.className = "linkhint mono " + cls;
+      store.set("link", v);
+    };
+    link.value = store.get("link", "");
+    link.addEventListener("input", checkLink); checkLink();
+    $("#linkform").addEventListener("submit", (e) => { e.preventDefault(); if (openA.getAttribute("aria-disabled") === "false") openA.click(); });
+    $("#bookmarklet").addEventListener("click", (e) => { e.preventDefault(); toast("Перетащите кнопку на панель закладок, а нажимайте её на вкладке Pixso"); });
+    $("#copy-snippet").addEventListener("click", () => copy($("#snippet-src").textContent, "Код скопирован — вставьте его в консоль на вкладке Pixso"));
 
     $("#filter").addEventListener("input", (e) => { S.filter = e.target.value; renderRail(); });
     $("#frame-select").addEventListener("change", (e) => openFrame(e.target.value));

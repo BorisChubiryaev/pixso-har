@@ -20,23 +20,35 @@
 <section class="intro" id="intro">
   <div>
     <h2>Вскрываем макет Pixso <em>без MCP</em></h2>
-    <p class="lead">Когда Pixso MCP падает, а по ссылке всё открывается, сам макет уже лежит в вашем браузере. Раскрой берёт его из HAR-файла, разбирает бинарный документ Pixso и собирает описание фрейма для ГигаКода: слои, auto-layout, цвета с токенами, шрифты и все тексты.</p>
-    <div class="drop" id="dropzone" role="button" tabindex="0" aria-label="Выбрать HAR-файл">
+    <p class="lead">Когда Pixso MCP падает, а по ссылке всё открывается, сам макет уже лежит в вашем браузере. Вставьте ссылку на фрейм, откройте его и нажмите закладку «Раскрой»: она достанет документ из Pixso и соберёт описание для ГигаКода — слои, auto-layout, цвета с токенами, шрифты и все тексты.</p>
+    <form class="linkbar" id="linkform" autocomplete="off">
+      <label class="label" for="link">Ссылка на макет</label>
+      <div class="linkrow">
+        <input class="field" id="link" type="url" inputmode="url" placeholder="https://pixso.design.sber.ru/app/design/…?item-id=185:274028">
+        <a class="btn primary" id="open-link" href="#" target="_blank" rel="noopener" aria-disabled="true">Открыть в Pixso</a>
+      </div>
+      <div class="linkhint mono" id="linkhint">Вставьте ссылку из адресной строки Pixso или из «Копировать ссылку»</div>
+    </form>
+    <div class="drop" id="dropzone" role="button" tabindex="0" aria-label="Выбрать файл .raskroy или .har">
       <i class="crop tl"></i><i class="crop tr"></i><i class="crop bl"></i><i class="crop br"></i>
-      <strong>Перетащите сюда .har или .zip с ним</strong>
-      <span class="hint">или нажмите, чтобы выбрать файл · обычно 20–80 МБ</span>
-      <span class="btn primary" data-icon="upload">Выбрать файл</span>
+      <strong>Или перетащите сюда пакет .raskroy, .har или .zip</strong>
+      <span class="hint">пакет сохраняет закладка, HAR — DevTools · нажмите, чтобы выбрать файл</span>
     </div>
-    <div class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Файл не покидает браузер: разбор идёт на вашем компьютере, без сервера. В HAR есть токены сессии — не пересылайте его.</span></div>
+    <div class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Всё считается на вашем компьютере. Закладка работает от вашего входа в Pixso и только читает файл, ничего не меняя. Данные никуда не отправляются.</span></div>
   </div>
   <aside class="steps" aria-labelledby="howto">
-    <h3 id="howto">Как снять HAR</h3>
+    <h3 id="howto">По ссылке · один раз настроить</h3>
     <ol>
-      <li><div><b>Откройте фрейм в Chrome</b><span>Ссылка вида <span class="mono">…/app/design/…?item-id=185:274028</span> — этот фрейм откроется первым.</span></div></li>
-      <li><div><b>DevTools → Network</b><span>Нажмите <kbd>F12</kbd>, вкладка Network, включите <b style="display:inline">Preserve log</b>.</span></div></li>
-      <li><div><b>Обновите страницу</b><span><kbd>Ctrl</kbd> + <kbd>R</kbd> и дождитесь, пока макет полностью отрисуется.</span></div></li>
-      <li><div><b>Сохраните HAR</b><span>Правый клик по списку запросов → <span class="mono">Save all as HAR with content</span>.</span></div></li>
+      <li><div><b>Перетащите кнопку на панель закладок</b>
+        <span class="bmrow"><a class="bookmarklet" id="bookmarklet" href="/*@@BOOKMARKLET@@*/" title="Перетащите на панель закладок">Раскрой ▸ Pixso</a><button class="btn ghost" id="copy-snippet" type="button" data-icon="copy">Код для консоли</button></span>
+        <span>Панели не видно — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>. Если закладки запрещены, вставьте код в консоль Pixso (<kbd>F12</kbd> → Console).</span></div></li>
+      <li><div><b>Откройте макет</b><span>Вставьте ссылку слева и нажмите «Открыть в Pixso», или просто откройте фрейм как обычно.</span></div></li>
+      <li><div><b>Нажмите закладку на вкладке Pixso</b><span>Появится панель «Раскрой». Через пару секунд нажмите «Копировать для ГигаКода» — описание фрейма окажется в буфере обмена.</span></div></li>
     </ol>
+    <details class="harway">
+      <summary>Запасной путь: через HAR</summary>
+      <span>Откройте фрейм в Chrome → <kbd>F12</kbd> → Network → включите Preserve log → <kbd>Ctrl</kbd> + <kbd>R</kbd> → дождитесь макета → правый клик по списку → <span class="mono">Save all as HAR with content</span>. Перетащите файл слева.</span>
+    </details>
   </aside>
 </section>
 
@@ -125,7 +137,7 @@
   <span>Esc — снять выделение · Ctrl + колесо — масштаб</span>
 </footer>
 
-<input type="file" id="file" accept=".har,.zip,application/json,application/zip" hidden>
+<input type="file" id="file" accept=".raskroy,.har,.zip,application/json,application/zip" hidden>
 <div class="dropall" id="dropall" hidden>Отпустите — раскроим</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -141,6 +153,7 @@
 <script>
 /*@@DEMO@@*/
 </script>
+<script type="text/plain" id="snippet-src">/*@@SNIPPET@@*/</script>
 <script>
 /*@@APP@@*/
 </script>

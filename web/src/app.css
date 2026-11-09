@@ -64,7 +64,7 @@ button, input, select { font: inherit; color: inherit; }
 .tnum { font-variant-numeric: tabular-nums; }
 
 /* ---------- кнопки */
-.btn {
+.btn { text-decoration: none;
   display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
   border: 1px solid var(--rule); border-radius: var(--r-1); background: var(--panel);
   cursor: pointer; font-weight: 500; font-size: var(--t-sm); white-space: nowrap;
@@ -105,7 +105,7 @@ button, input, select { font: inherit; color: inherit; }
 .intro p.lead { margin: 0 0 20px; color: var(--ink-soft); max-width: 58ch; }
 .drop {
   position: relative; display: grid; place-items: center; text-align: center; gap: 12px;
-  min-height: 190px; padding: 28px 20px; border-radius: 2px; cursor: pointer;
+  min-height: 120px; padding: 22px 20px; border-radius: 2px; cursor: pointer;
   background:
     linear-gradient(var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
     linear-gradient(90deg, var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
@@ -121,6 +121,24 @@ button, input, select { font: inherit; color: inherit; }
 .drop .crop.br { right: -1px; bottom: -1px; border-right-width: 1.5px; border-bottom-width: 1.5px; }
 .drop strong { font: 600 1.05rem/1.3 var(--font-ui); }
 .drop .hint { color: var(--ink-soft); font-size: var(--t-sm); }
+.linkbar { display: grid; gap: 6px; margin-bottom: 14px; }
+.linkrow { display: flex; gap: 8px; }
+.linkrow .field { flex: 1; min-width: 0; height: 40px; font-size: var(--t-sm); background: var(--panel); }
+.linkrow .btn { height: 40px; }
+.linkrow .btn[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+.linkhint { color: var(--ink-faint); min-height: 1.4em; overflow-wrap: anywhere; }
+.linkhint.ok { color: var(--good); }
+.linkhint.bad { color: var(--bad); }
+.drop.small { min-height: 0; }
+.bmrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 6px; }
+.bookmarklet {
+  display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 99px; text-decoration: none; cursor: grab;
+  font: 700 0.8rem/1 var(--font-display); letter-spacing: 0.01em; color: var(--accent-ink); background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft); outline: 1.5px dashed var(--accent); outline-offset: 4px;
+}
+.bookmarklet:active { cursor: grabbing; }
+.harway { margin-top: 16px; padding-top: 12px; border-top: 1.5px dashed var(--mat-line-strong); font-size: var(--t-sm); color: var(--ink-soft); }
+.harway summary { cursor: pointer; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .privacy { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; color: var(--ink-soft); font-size: var(--t-sm); }
 .privacy svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--good); }
 
