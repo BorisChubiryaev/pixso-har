@@ -112,10 +112,6 @@ const CORE = (() => {
     let har;
     try { har = JSON.parse(utf8.decode(u8)); } catch (e) { throw new Error("Файл не читается как HAR (JSON). Сохраните его через DevTools → Network → «Save all as HAR with content»."); }
     const entries = har?.log?.entries;
-    if (har?.format === "raskroy-pack") {
-      const r = decodeDocument(b64(har.schema), b64(har.doc), progress);
-      return Object.assign(r, { images: {}, pageUrl: har.url, fileName });
-    }
     if (!entries) throw new Error("В файле нет log.entries — это не HAR.");
     let schema = null, doc = null, docRaw = 0, pageUrl = null;
     const images = {};
@@ -133,15 +129,11 @@ const CORE = (() => {
     }
     if (!schema) throw new Error("В HAR нет схемы Pixso (/app/pixso.binary). Включите Preserve log, обновите страницу с Ctrl+Shift+R и сохраните HAR «with content».");
     if (!doc) throw new Error("В HAR нет документа (WebSocket /ws/coop). Включите Preserve log, обновите страницу и дождитесь, пока макет отрисуется, затем сохраните HAR.");
-    const r = decodeDocument(schema, b64(doc), progress);
-    return Object.assign(r, { images, pageUrl, fileName });
-  }
-
-  // schema — байты /app/pixso.binary, raw — бинарное сообщение документа ("pixso-kw" + zstd)
-  function decodeDocument(schema, raw, progress = () => {}) {
     const S = parseSchema(schema);
     progress("schema", `Kiwi ${S.__version || "?"} · ${S.__count} типов`);
+    const raw = b64(doc);
     let body;
+    const z = raw.indexOf(0x28, 8);
     const head = utf8.decode(raw.subarray(0, 20));
     if (head.includes("ZSTD")) {
       let i = 8; while (i < raw.length - 4 && !(raw[i] === 0x28 && raw[i + 1] === 0xb5 && raw[i + 2] === 0x2f && raw[i + 3] === 0xfd)) i++;
@@ -149,11 +141,12 @@ const CORE = (() => {
     } else {
       const i = head.indexOf("NONE"); body = raw.subarray(i + 4 + 10);
     }
+    void z;
     progress("doc", `${(raw.length / 1048576).toFixed(1)} → ${(body.length / 1048576).toFixed(1)} МБ`);
     const msg = decodeMessage(S, body, "PixsoMsg");
     const scene = new Scene(msg);
     progress("nodes", `${scene.nodes.size.toLocaleString("ru-RU")} слоёв`);
-    return { scene, meta: { schema: S.__version, created: msg.createVersion, nodes: scene.nodes.size, docMB: body.length / 1048576 } };
+    return { scene, images, pageUrl, fileName, meta: { schema: S.__version, created: msg.createVersion, nodes: scene.nodes.size, docMB: body.length / 1048576 } };
   }
 
   // ---------------------------------------------------------------- сцена
@@ -526,5 +519,5 @@ const CORE = (() => {
     return lines.join("\n") + "\n";
   }
 
-  return { loadHar, decodeDocument, buildFrame, markdown, toMd, summarize, gid, Scene, parseSchema, decodeMessage };
+  return { loadHar, buildFrame, markdown, toMd, summarize, gid, Scene, parseSchema, decodeMessage };
 })();
