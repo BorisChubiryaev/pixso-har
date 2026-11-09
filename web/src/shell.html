@@ -1,0 +1,146 @@
+<title>Раскрой макетов Pixso</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Достаёт макет Pixso из HAR-файла браузера и собирает описание фрейма для ГигаКода. Работает локально, без сервера.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600&family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap">
+<style>
+/*@@CSS@@*/
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Раск<span>рой</span></h1>
+    <span class="tag mono">HAR → макет Pixso → описание для ГигаКода</span>
+  </div>
+  <div class="filechip" id="filechip"></div>
+</header>
+<div class="cutline" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="4.5" r="2.2"/><circle cx="4" cy="11.5" r="2.2"/><path d="M5.8 5.7 15 12M5.8 10.3 15 4"/></svg></div>
+
+<section class="intro" id="intro">
+  <div>
+    <h2>Вскрываем макет Pixso <em>без MCP</em></h2>
+    <p class="lead">Когда Pixso MCP падает, а по ссылке всё открывается, сам макет уже лежит в вашем браузере. Раскрой берёт его из HAR-файла, разбирает бинарный документ Pixso и собирает описание фрейма для ГигаКода: слои, auto-layout, цвета с токенами, шрифты и все тексты.</p>
+    <div class="drop" id="dropzone" role="button" tabindex="0" aria-label="Выбрать HAR-файл">
+      <i class="crop tl"></i><i class="crop tr"></i><i class="crop bl"></i><i class="crop br"></i>
+      <strong>Перетащите сюда .har или .zip с ним</strong>
+      <span class="hint">или нажмите, чтобы выбрать файл · обычно 20–80 МБ</span>
+      <span class="btn primary" data-icon="upload">Выбрать файл</span>
+    </div>
+    <div class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Файл не покидает браузер: разбор идёт на вашем компьютере, без сервера. В HAR есть токены сессии — не пересылайте его.</span></div>
+  </div>
+  <aside class="steps" aria-labelledby="howto">
+    <h3 id="howto">Как снять HAR</h3>
+    <ol>
+      <li><div><b>Откройте фрейм в Chrome</b><span>Ссылка вида <span class="mono">…/app/design/…?item-id=185:274028</span> — этот фрейм откроется первым.</span></div></li>
+      <li><div><b>DevTools → Network</b><span>Нажмите <kbd>F12</kbd>, вкладка Network, включите <b style="display:inline">Preserve log</b>.</span></div></li>
+      <li><div><b>Обновите страницу</b><span><kbd>Ctrl</kbd> + <kbd>R</kbd> и дождитесь, пока макет полностью отрисуется.</span></div></li>
+      <li><div><b>Сохраните HAR</b><span>Правый клик по списку запросов → <span class="mono">Save all as HAR with content</span>.</span></div></li>
+    </ol>
+  </aside>
+</section>
+
+<main class="desk">
+  <nav class="rail" aria-label="Фреймы">
+    <div class="head">
+      <div class="label">Фреймы · <span id="frames-count" class="tnum">0</span></div>
+      <input class="field" id="filter" type="search" placeholder="Найти по имени или id" autocomplete="off">
+      <select class="field frame-select" id="frame-select" aria-label="Фрейм"></select>
+    </div>
+    <div class="frames" id="frames"></div>
+  </nav>
+
+  <section class="stage" aria-label="Превью фрейма">
+    <div class="stagebar">
+      <div class="title"><b id="st-name"></b><span class="mono" id="st-crumbs"></span></div>
+      <div class="tools">
+        <span class="badge-demo" id="demo-badge">Пример</span>
+        <span class="mono tnum" id="zoom-val">100%</span>
+        <div class="seg" id="zoom" role="group" aria-label="Масштаб">
+          <button data-z="fit">Вписать</button><button data-z="0.5">50%</button><button data-z="1">100%</button><button data-z="2">200%</button>
+        </div>
+      </div>
+    </div>
+    <div class="rulers">
+      <div class="corner">px</div>
+      <canvas class="rx" id="rx" aria-hidden="true"></canvas>
+      <canvas class="ry" id="ry" aria-hidden="true"></canvas>
+      <div class="view" id="view">
+        <div class="pad">
+          <div class="sheet" id="sheet">
+            <div class="board" id="board"></div>
+            <div class="hl" id="hl" hidden><span class="tagx"></span></div>
+            <div class="sel" id="sel" hidden><span class="tagx"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel" aria-label="Результат">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="md">Для ГигаКода <span class="mono tnum" id="tab-md-n"></span></button>
+      <button role="tab" data-tab="layers">Слои <span class="mono tnum" id="tab-layers-n"></span></button>
+      <button role="tab" data-tab="sum">Сводка <span class="mono tnum" id="tab-sum-n"></span></button>
+    </div>
+
+    <div class="tabpane" data-tab="md">
+      <div class="actions">
+        <button class="btn primary" id="copy-md" data-icon="copy">Копировать описание</button>
+        <button class="btn" id="dl" data-icon="save" hidden>Сохранить .md</button>
+        <span class="meta mono" id="md-meta"></span>
+      </div>
+      <details class="prompt">
+        <summary>Промпт, который стоит приложить <button class="btn" id="copy-prompt">Копировать</button></summary>
+        <pre id="prompt-text">Сверстай экран по описанию макета ниже.
+- Структуру и отступы бери из flex-row / flex-column, gap и pad.
+- Цвета и шрифты бери точно из описания. Если указан [стиль], используй токен дизайн-системы с таким именем, если он есть в проекте.
+- «⟶ компонент «…»» — компонент дизайн-системы: если в проекте есть такой компонент, используй его, а не верстай с нуля.
+- Координаты @(x,y) нужны только для элементов без auto-layout и с пометкой absolute.</pre>
+      </details>
+      <pre class="md" id="md" tabindex="0" aria-label="Описание фрейма в Markdown"></pre>
+    </div>
+
+    <div class="tabpane" data-tab="layers" hidden>
+      <div class="tree" id="tree" role="tree" aria-label="Дерево слоёв"></div>
+      <div class="inspector" id="inspector"></div>
+    </div>
+
+    <div class="tabpane" data-tab="sum" hidden>
+      <div class="summary">
+        <div><h6 class="label">Цвета — нажмите, чтобы скопировать</h6><div class="swatches" id="swatches"></div></div>
+        <div><h6 class="label">Типографика</h6><div class="specimens" id="specimens"></div></div>
+        <div><h6 class="label">Компоненты дизайн-системы</h6><ul class="comps" id="comps"></ul></div>
+      </div>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="hidden-layers"> Показывать скрытые слои</label>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot mono">
+  <span>Формат Pixso: Kiwi schema v9.99 · zstd · всё считается в браузере</span>
+  <span>Esc — снять выделение · Ctrl + колесо — масштаб</span>
+</footer>
+
+<input type="file" id="file" accept=".har,.zip,application/json,application/zip" hidden>
+<div class="dropall" id="dropall" hidden>Отпустите — раскроим</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script id="zstd-src">
+/*@@ZSTD@@*/
+</script>
+<script id="core-src">
+/*@@CORE@@*/
+</script>
+<script type="text/plain" id="worker-src">
+/*@@WORKER@@*/
+</script>
+<script>
+/*@@DEMO@@*/
+</script>
+<script>
+/*@@APP@@*/
+</script>

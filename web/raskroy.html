@@ -1,0 +1,1950 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Раскрой макетов Pixso</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Достаёт макет Pixso из HAR-файла браузера и собирает описание фрейма для ГигаКода. Работает локально, без сервера.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600&family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap">
+<style>
+/* Раскрой — интерфейс как коврик для резки макетов: сетка, линейки в пикселях фрейма, метки обреза, пунктир линии реза.
+   Слои: шапка → (пустое состояние: зона приёма + инструкция) → рабочий стол: список фреймов | коврик с превью | панель вывода. */
+:root {
+  --ground: #e3ebe5;
+  --mat: #cddcd2;
+  --mat-line: rgba(18, 72, 52, 0.09);
+  --mat-line-strong: rgba(18, 72, 52, 0.2);
+  --panel: #f3f7f4;
+  --panel-2: #e9f0eb;
+  --ink: #10221b;
+  --ink-soft: #4a6057;
+  --ink-faint: #7d9188;
+  --rule: rgba(16, 40, 30, 0.14);
+  --accent: #a96400;
+  --accent-ink: #fff8ea;
+  --accent-soft: rgba(169, 100, 0, 0.13);
+  --bad: #b8371f;
+  --good: #1f7a3f;
+  --board-shadow: 0 1px 0 rgba(16, 40, 30, 0.08), 0 18px 40px -18px rgba(16, 40, 30, 0.35);
+
+  --font-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --font-ui: "Onest", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --t-xs: 0.6875rem;
+  --t-sm: 0.8125rem;
+  --t-md: 0.9375rem;
+  --t-lg: 1.25rem;
+  --t-xl: clamp(1.6rem, 1.1rem + 2vw, 2.6rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0d221d; --mat: #163830; --mat-line: rgba(215, 240, 228, 0.06); --mat-line-strong: rgba(215, 240, 228, 0.15);
+    --panel: #102d27; --panel-2: #143630; --ink: #e4efe9; --ink-soft: #9ab4a9; --ink-faint: #6f8a7f; --rule: rgba(215, 240, 228, 0.12);
+    --accent: #f0bf4c; --accent-ink: #1d1500; --accent-soft: rgba(240, 191, 76, 0.15); --bad: #ff8a70; --good: #6fd08f;
+    --board-shadow: 0 0 0 1px rgba(215, 240, 228, 0.06), 0 24px 50px -20px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0d221d; --mat: #163830; --mat-line: rgba(215, 240, 228, 0.06); --mat-line-strong: rgba(215, 240, 228, 0.15);
+  --panel: #102d27; --panel-2: #143630; --ink: #e4efe9; --ink-soft: #9ab4a9; --ink-faint: #6f8a7f; --rule: rgba(215, 240, 228, 0.12);
+  --accent: #f0bf4c; --accent-ink: #1d1500; --accent-soft: rgba(240, 191, 76, 0.15); --bad: #ff8a70; --good: #6fd08f;
+  --board-shadow: 0 0 0 1px rgba(215, 240, 228, 0.06), 0 24px 50px -20px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 var(--t-md)/1.5 var(--font-ui);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 24px;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-size: var(--t-xs); letter-spacing: 0.01em; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---------- кнопки */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  border: 1px solid var(--rule); border-radius: var(--r-1); background: var(--panel);
+  cursor: pointer; font-weight: 500; font-size: var(--t-sm); white-space: nowrap;
+}
+.btn:hover { border-color: var(--ink-soft); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.ghost { background: transparent; }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-1); overflow: hidden; background: var(--panel); }
+.seg button { border: 0; background: transparent; height: 30px; padding: 0 10px; cursor: pointer; font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-soft); }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+
+/* ---------- шапка */
+.top {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding-block: 18px 14px;
+}
+.brand { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.brand h1 { margin: 0; font: 700 1.5rem/1 var(--font-display); letter-spacing: -0.01em; }
+.brand h1 span { color: var(--accent); }
+.brand .tag { color: var(--ink-soft); }
+.filechip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.filechip .meta { color: var(--ink-soft); text-align: right; }
+.filechip .meta b { color: var(--ink); font-weight: 500; }
+
+.cutline { height: 0; border-top: 1.5px dashed var(--mat-line-strong); position: relative; margin: 0; }
+.cutline svg { position: absolute; left: 0; top: -8px; width: 16px; height: 16px; color: var(--ink-faint); background: var(--ground); padding-right: 4px; box-sizing: content-box; }
+
+/* ---------- пустое состояние */
+.intro {
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; align-items: stretch;
+  padding-block: 22px 26px;
+}
+.intro h2 { font: 600 var(--t-xl)/1.08 var(--font-display); margin: 0 0 14px; letter-spacing: -0.02em; text-wrap: balance; max-width: 18ch; }
+.intro h2 em { font-style: normal; color: var(--accent); }
+.intro p.lead { margin: 0 0 20px; color: var(--ink-soft); max-width: 58ch; }
+.drop {
+  position: relative; display: grid; place-items: center; text-align: center; gap: 12px;
+  min-height: 190px; padding: 28px 20px; border-radius: 2px; cursor: pointer;
+  background:
+    linear-gradient(var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
+    linear-gradient(90deg, var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--mat);
+  outline: 1.5px dashed var(--mat-line-strong); outline-offset: -10px;
+  transition: outline-color 0.15s, background-color 0.15s;
+}
+.drop:hover, .drop.over { outline-color: var(--accent); }
+.drop .crop { position: absolute; width: 18px; height: 18px; border-color: var(--ink-soft); border-style: solid; border-width: 0; }
+.drop .crop.tl { left: -1px; top: -1px; border-left-width: 1.5px; border-top-width: 1.5px; }
+.drop .crop.tr { right: -1px; top: -1px; border-right-width: 1.5px; border-top-width: 1.5px; }
+.drop .crop.bl { left: -1px; bottom: -1px; border-left-width: 1.5px; border-bottom-width: 1.5px; }
+.drop .crop.br { right: -1px; bottom: -1px; border-right-width: 1.5px; border-bottom-width: 1.5px; }
+.drop strong { font: 600 1.05rem/1.3 var(--font-ui); }
+.drop .hint { color: var(--ink-soft); font-size: var(--t-sm); }
+.privacy { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; color: var(--ink-soft); font-size: var(--t-sm); }
+.privacy svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--good); }
+
+.steps { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--r-2); padding: 20px 22px; min-width: 0; }
+.steps h3 { margin: 0 0 14px; font: 600 var(--t-sm)/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
+.steps ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; align-items: start; counter-increment: s; }
+.steps li::before {
+  content: counter(s); font: 700 0.95rem/32px var(--font-display); text-align: center;
+  width: 32px; height: 32px; border: 1.5px solid var(--ink); border-radius: 50%;
+}
+.steps li b { display: block; font-weight: 600; }
+.steps li span { color: var(--ink-soft); font-size: var(--t-sm); }
+kbd { font-family: var(--font-mono); font-size: 0.72em; padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); color: var(--ink); white-space: nowrap; }
+
+/* ---------- рабочий стол */
+.desk {
+  display: grid; gap: 12px; margin-top: 16px;
+  grid-template-columns: 236px minmax(0, 1fr) minmax(340px, 30%);
+  grid-template-areas: "rail stage panel";
+  height: max(660px, calc(100vh - 100px));
+}
+.rail, .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--r-2); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.rail { grid-area: rail; }
+.panel { grid-area: panel; }
+.stage { grid-area: stage; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: var(--r-2); overflow: hidden; border: 1px solid var(--rule); background: var(--mat); position: relative; }
+
+.rail .head { padding: 12px; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
+.label { font: 500 var(--t-xs)/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-faint); }
+.field { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--rule); border-radius: var(--r-1); background: var(--ground); }
+.frames { overflow: auto; padding: 6px 6px 12px; flex: 1; }
+.frames .page { padding: 12px 8px 6px; display: flex; justify-content: space-between; gap: 8px; }
+.frames .page span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frames button {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: transparent; text-align: left; padding: 7px 8px; border-radius: var(--r-1); cursor: pointer; font-size: var(--t-sm);
+}
+.frames button.sub { padding-left: 22px; }
+.frames button:hover { background: var(--panel-2); }
+.frames button .sq { width: 8px; height: 8px; border: 1.5px solid var(--ink-faint); }
+.frames button .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frames button .dim { color: var(--ink-faint); }
+.frames button[aria-current="true"] { background: var(--accent-soft); }
+.frames button[aria-current="true"] .sq { background: var(--accent); border-color: var(--accent); }
+.frames button[aria-current="true"] .nm { font-weight: 600; }
+.frames .empty { padding: 16px 8px; color: var(--ink-soft); font-size: var(--t-sm); }
+.frame-select { display: none; }
+
+/* stage */
+.stagebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px 8px 14px; background: var(--panel); border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.stagebar .title { min-width: 0; display: grid; }
+.stagebar .title b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stagebar .title .mono { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stagebar .tools { display: flex; align-items: center; gap: 8px; }
+.badge-demo { font: 600 var(--t-xs)/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 5px 8px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); }
+
+.rulers { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: 22px minmax(0, 1fr); }
+.rulers .corner { background: var(--panel); border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); display: grid; place-items: center; color: var(--ink-faint); font: 500 8px/1 var(--font-mono); }
+.rulers canvas { display: block; width: 100%; height: 100%; background: var(--panel); }
+.rulers .rx { border-bottom: 1px solid var(--rule); }
+.rulers .ry { border-right: 1px solid var(--rule); }
+.view {
+  overflow: auto; position: relative; min-width: 0; min-height: 0;
+  background:
+    linear-gradient(var(--mat-line-strong) 1px, transparent 1px) 0 0 / 80px 80px,
+    linear-gradient(90deg, var(--mat-line-strong) 1px, transparent 1px) 0 0 / 80px 80px,
+    linear-gradient(var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
+    linear-gradient(90deg, var(--mat-line) 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--mat);
+  background-attachment: local;
+}
+.view .pad { padding: 48px; width: max-content; min-width: 100%; }
+.sheet { position: relative; box-shadow: var(--board-shadow); margin: 0 auto; }
+.board { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; contain: layout paint; }
+.board .n { position: absolute; transform-origin: 0 0; }
+.board .n.txt { display: flex; flex-direction: column; }
+.board svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.hl, .sel { position: absolute; pointer-events: none; z-index: 5; }
+.hl { outline: 1px solid var(--accent); background: var(--accent-soft); }
+.sel { outline: 2px solid var(--accent); }
+.hl .tagx, .sel .tagx {
+  position: absolute; left: -2px; top: -22px; white-space: nowrap; font: 500 10px/18px var(--font-mono);
+  padding: 0 6px; background: var(--accent); color: var(--accent-ink); border-radius: 3px;
+}
+.sel .tagx { top: auto; bottom: -22px; }
+
+/* прогресс */
+.progress { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--mat) 82%, transparent); backdrop-filter: blur(2px); }
+.progress .card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--rule); border-radius: var(--r-2); padding: 20px 22px; position: relative; overflow: hidden; box-shadow: var(--board-shadow); }
+.progress .blade { position: absolute; left: 0; top: 0; height: 3px; width: 100%; background: repeating-linear-gradient(90deg, var(--accent) 0 10px, transparent 10px 16px); animation: cut 1.1s linear infinite; }
+@keyframes cut { from { background-position: 0 0; } to { background-position: 32px 0; } }
+.progress h4 { margin: 0 0 4px; font: 600 1rem/1.3 var(--font-ui); }
+.progress .file { color: var(--ink-soft); margin-bottom: 14px; overflow-wrap: anywhere; }
+.progress ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.progress li { display: grid; grid-template-columns: 14px 92px minmax(0, 1fr); gap: 10px; align-items: center; font-size: var(--t-sm); color: var(--ink-faint); }
+.progress li .dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid currentColor; }
+.progress li.done { color: var(--ink); }
+.progress li.done .dot { background: var(--good); border-color: var(--good); }
+.progress li.now { color: var(--ink); }
+.progress li.now .dot { border-color: var(--accent); animation: pulse 0.9s ease-in-out infinite alternate; }
+@keyframes pulse { to { background: var(--accent); } }
+.progress li .d { color: var(--ink-soft); }
+.progress .err { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--bad); border-radius: var(--r-1); color: var(--bad); font-size: var(--t-sm); }
+.progress .err + .btn { margin-top: 12px; }
+
+/* panel */
+.tabs { display: flex; border-bottom: 1px solid var(--rule); padding: 0 6px; }
+.tabs button { border: 0; background: transparent; padding: 12px 10px 10px; cursor: pointer; font-weight: 500; font-size: var(--t-sm); color: var(--ink-soft); border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; gap: 6px; align-items: baseline; }
+.tabs button .mono { color: var(--ink-faint); }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabpane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tabpane[hidden] { display: none !important; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px; border-bottom: 1px solid var(--rule); }
+.actions .meta { margin-left: auto; color: var(--ink-faint); text-align: right; }
+.md { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 12px 14px 20px; font: 400 11px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-soft); }
+.md .h { color: var(--ink); font-weight: 600; }
+.md .t { color: var(--ink); font-weight: 600; }
+.md .nm { color: var(--ink); }
+.md .cmp { color: var(--accent); }
+.md .tx { color: var(--good); }
+.md .sw { display: inline-block; width: 9px; height: 9px; margin-right: 3px; vertical-align: -1px; border: 1px solid var(--rule); border-radius: 2px; }
+.prompt { margin: 0 12px 12px; border: 1px dashed var(--mat-line-strong); border-radius: var(--r-1); }
+.prompt summary { cursor: pointer; padding: 9px 12px; font-size: var(--t-sm); font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.prompt pre { margin: 0; padding: 0 12px 10px; font: 400 11px/1.6 var(--font-mono); white-space: pre-wrap; color: var(--ink-soft); }
+.prompt .btn { height: 28px; padding: 0 10px; }
+
+.tree { flex: 1 1 55%; min-height: 0; overflow: auto; padding: 6px 4px; font-size: var(--t-sm); }
+.tree .row { display: grid; grid-template-columns: 16px 26px minmax(0, 1fr) auto; align-items: center; gap: 4px; padding: 3px 8px 3px 0; border-radius: 4px; cursor: pointer; }
+.tree .row:hover { background: var(--panel-2); }
+.tree .row[aria-selected="true"] { background: var(--accent-soft); }
+.tree .tw { border: 0; background: transparent; width: 16px; height: 16px; padding: 0; cursor: pointer; color: var(--ink-faint); display: grid; place-items: center; }
+.tree .tw svg { width: 10px; height: 10px; transition: transform 0.12s; }
+.tree .tw[aria-expanded="true"] svg { transform: rotate(90deg); }
+.tree .ty { font: 600 9px/16px var(--font-mono); text-align: center; border-radius: 3px; background: var(--panel-2); color: var(--ink-soft); }
+.tree .ty.in { background: var(--accent-soft); color: var(--accent); }
+.tree .ty.tx { color: var(--good); }
+.tree .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree .nm q { color: var(--ink-soft); }
+.tree .dm { color: var(--ink-faint); }
+.tree .kids[hidden] { display: none; }
+.inspector { flex: 0 1 45%; min-height: 160px; overflow: auto; border-top: 1px solid var(--rule); padding: 12px 14px 16px; background: var(--panel-2); }
+.inspector h5 { margin: 0 0 2px; font: 600 var(--t-md)/1.3 var(--font-ui); overflow-wrap: anywhere; }
+.inspector .sub { color: var(--ink-faint); margin-bottom: 10px; }
+.inspector dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; margin: 0 0 12px; font-size: var(--t-sm); }
+.inspector dt { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--t-xs); padding-top: 2px; }
+.inspector dd { margin: 0; overflow-wrap: anywhere; }
+.inspector .chip { display: inline-flex; align-items: center; gap: 6px; margin: 0 8px 4px 0; font-family: var(--font-mono); font-size: var(--t-xs); }
+.inspector .chip i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); display: inline-block; }
+.inspector .empty { color: var(--ink-soft); font-size: var(--t-sm); }
+
+.summary { overflow: auto; padding: 14px; display: grid; gap: 20px; align-content: start; }
+.summary h6 { margin: 0 0 10px; }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.swatches button { border: 1px solid var(--rule); border-radius: var(--r-1); background: var(--panel); padding: 0; overflow: hidden; cursor: pointer; text-align: left; }
+.swatches button i { display: block; height: 38px; border-bottom: 1px solid var(--rule); }
+.swatches button span { display: flex; justify-content: space-between; gap: 4px; padding: 5px 7px; font-family: var(--font-mono); font-size: 10px; }
+.swatches button span em { font-style: normal; color: var(--ink-faint); }
+.specimens { display: grid; gap: 6px; }
+.specimens div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r-1); background: var(--panel); }
+.specimens .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.specimens .mono { color: var(--ink-faint); }
+.comps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--t-sm); }
+.comps li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 5px 2px; border-bottom: 1px dashed var(--rule); }
+.comps li span:first-child { overflow-wrap: anywhere; }
+.comps li .mono { color: var(--ink-faint); }
+
+.opts { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--rule); font-size: var(--t-sm); color: var(--ink-soft); }
+.opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.opts input { accent-color: var(--accent); }
+
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none; z-index: 60; padding: 10px 16px; border-radius: 99px; background: var(--ink); color: var(--panel); font-size: var(--t-sm); font-weight: 500; transition: opacity 0.18s, transform 0.18s; }
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.dropall { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--mat) 88%, transparent); outline: 3px dashed var(--accent); outline-offset: -18px; font: 600 var(--t-xl)/1.1 var(--font-display); color: var(--ink); text-align: center; padding: 24px; pointer-events: none; }
+
+footer.foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; color: var(--ink-faint); }
+
+/* ---------- адаптив */
+@media (max-width: 1180px) {
+  .desk { grid-template-columns: 220px minmax(0, 1fr); grid-template-areas: "rail stage" "panel panel"; height: auto; grid-template-rows: 640px 640px; }
+}
+@media (max-width: 820px) {
+  .intro { grid-template-columns: minmax(0, 1fr); }
+  .desk { grid-template-columns: minmax(0, 1fr); grid-template-areas: "rail" "stage" "panel"; grid-template-rows: auto 70vh 80vh; }
+  .rail .frames { display: none; }
+  .frame-select { display: block; }
+  .brand .tag { display: none; }
+  .rulers { grid-template-columns: 0 minmax(0, 1fr); grid-template-rows: 0 minmax(0, 1fr); }
+  .view .pad { padding: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Раск<span>рой</span></h1>
+    <span class="tag mono">HAR → макет Pixso → описание для ГигаКода</span>
+  </div>
+  <div class="filechip" id="filechip"></div>
+</header>
+<div class="cutline" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="4.5" r="2.2"/><circle cx="4" cy="11.5" r="2.2"/><path d="M5.8 5.7 15 12M5.8 10.3 15 4"/></svg></div>
+
+<section class="intro" id="intro">
+  <div>
+    <h2>Вскрываем макет Pixso <em>без MCP</em></h2>
+    <p class="lead">Когда Pixso MCP падает, а по ссылке всё открывается, сам макет уже лежит в вашем браузере. Раскрой берёт его из HAR-файла, разбирает бинарный документ Pixso и собирает описание фрейма для ГигаКода: слои, auto-layout, цвета с токенами, шрифты и все тексты.</p>
+    <div class="drop" id="dropzone" role="button" tabindex="0" aria-label="Выбрать HAR-файл">
+      <i class="crop tl"></i><i class="crop tr"></i><i class="crop bl"></i><i class="crop br"></i>
+      <strong>Перетащите сюда .har или .zip с ним</strong>
+      <span class="hint">или нажмите, чтобы выбрать файл · обычно 20–80 МБ</span>
+      <span class="btn primary" data-icon="upload">Выбрать файл</span>
+    </div>
+    <div class="privacy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Файл не покидает браузер: разбор идёт на вашем компьютере, без сервера. В HAR есть токены сессии — не пересылайте его.</span></div>
+  </div>
+  <aside class="steps" aria-labelledby="howto">
+    <h3 id="howto">Как снять HAR</h3>
+    <ol>
+      <li><div><b>Откройте фрейм в Chrome</b><span>Ссылка вида <span class="mono">…/app/design/…?item-id=185:274028</span> — этот фрейм откроется первым.</span></div></li>
+      <li><div><b>DevTools → Network</b><span>Нажмите <kbd>F12</kbd>, вкладка Network, включите <b style="display:inline">Preserve log</b>.</span></div></li>
+      <li><div><b>Обновите страницу</b><span><kbd>Ctrl</kbd> + <kbd>R</kbd> и дождитесь, пока макет полностью отрисуется.</span></div></li>
+      <li><div><b>Сохраните HAR</b><span>Правый клик по списку запросов → <span class="mono">Save all as HAR with content</span>.</span></div></li>
+    </ol>
+  </aside>
+</section>
+
+<main class="desk">
+  <nav class="rail" aria-label="Фреймы">
+    <div class="head">
+      <div class="label">Фреймы · <span id="frames-count" class="tnum">0</span></div>
+      <input class="field" id="filter" type="search" placeholder="Найти по имени или id" autocomplete="off">
+      <select class="field frame-select" id="frame-select" aria-label="Фрейм"></select>
+    </div>
+    <div class="frames" id="frames"></div>
+  </nav>
+
+  <section class="stage" aria-label="Превью фрейма">
+    <div class="stagebar">
+      <div class="title"><b id="st-name"></b><span class="mono" id="st-crumbs"></span></div>
+      <div class="tools">
+        <span class="badge-demo" id="demo-badge">Пример</span>
+        <span class="mono tnum" id="zoom-val">100%</span>
+        <div class="seg" id="zoom" role="group" aria-label="Масштаб">
+          <button data-z="fit">Вписать</button><button data-z="0.5">50%</button><button data-z="1">100%</button><button data-z="2">200%</button>
+        </div>
+      </div>
+    </div>
+    <div class="rulers">
+      <div class="corner">px</div>
+      <canvas class="rx" id="rx" aria-hidden="true"></canvas>
+      <canvas class="ry" id="ry" aria-hidden="true"></canvas>
+      <div class="view" id="view">
+        <div class="pad">
+          <div class="sheet" id="sheet">
+            <div class="board" id="board"></div>
+            <div class="hl" id="hl" hidden><span class="tagx"></span></div>
+            <div class="sel" id="sel" hidden><span class="tagx"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel" aria-label="Результат">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="md">Для ГигаКода <span class="mono tnum" id="tab-md-n"></span></button>
+      <button role="tab" data-tab="layers">Слои <span class="mono tnum" id="tab-layers-n"></span></button>
+      <button role="tab" data-tab="sum">Сводка <span class="mono tnum" id="tab-sum-n"></span></button>
+    </div>
+
+    <div class="tabpane" data-tab="md">
+      <div class="actions">
+        <button class="btn primary" id="copy-md" data-icon="copy">Копировать описание</button>
+        <button class="btn" id="dl" data-icon="save" hidden>Сохранить .md</button>
+        <span class="meta mono" id="md-meta"></span>
+      </div>
+      <details class="prompt">
+        <summary>Промпт, который стоит приложить <button class="btn" id="copy-prompt">Копировать</button></summary>
+        <pre id="prompt-text">Сверстай экран по описанию макета ниже.
+- Структуру и отступы бери из flex-row / flex-column, gap и pad.
+- Цвета и шрифты бери точно из описания. Если указан [стиль], используй токен дизайн-системы с таким именем, если он есть в проекте.
+- «⟶ компонент «…»» — компонент дизайн-системы: если в проекте есть такой компонент, используй его, а не верстай с нуля.
+- Координаты @(x,y) нужны только для элементов без auto-layout и с пометкой absolute.</pre>
+      </details>
+      <pre class="md" id="md" tabindex="0" aria-label="Описание фрейма в Markdown"></pre>
+    </div>
+
+    <div class="tabpane" data-tab="layers" hidden>
+      <div class="tree" id="tree" role="tree" aria-label="Дерево слоёв"></div>
+      <div class="inspector" id="inspector"></div>
+    </div>
+
+    <div class="tabpane" data-tab="sum" hidden>
+      <div class="summary">
+        <div><h6 class="label">Цвета — нажмите, чтобы скопировать</h6><div class="swatches" id="swatches"></div></div>
+        <div><h6 class="label">Типографика</h6><div class="specimens" id="specimens"></div></div>
+        <div><h6 class="label">Компоненты дизайн-системы</h6><ul class="comps" id="comps"></ul></div>
+      </div>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="hidden-layers"> Показывать скрытые слои</label>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot mono">
+  <span>Формат Pixso: Kiwi schema v9.99 · zstd · всё считается в браузере</span>
+  <span>Esc — снять выделение · Ctrl + колесо — масштаб</span>
+</footer>
+
+<input type="file" id="file" accept=".har,.zip,application/json,application/zip" hidden>
+<div class="dropall" id="dropall" hidden>Отпустите — раскроим</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script id="zstd-src">
+// Минимальный декодер Zstandard (RFC 8878) без зависимостей.
+// Поддерживает всё, что нужно для документа Pixso: raw/RLE/compressed блоки,
+// Huffman-литералы (1 и 4 потока, treeless), FSE-последовательности (predefined/RLE/compressed/repeat).
+// Не поддерживает словари. Контрольную сумму пропускает.
+
+const ZSTD = (() => {
+  const hb = (x) => 31 - Math.clz32(x); // индекс старшего бита
+
+  // Чтение n (<=24) бит, начиная с бита off (little-endian, бит 0 — младший бит первого байта)
+  function peek(buf, base, off, n) {
+    if (n === 0) return 0;
+    const i = base + (off >>> 3);
+    const v = (buf[i] | (buf[i + 1] << 8) | (buf[i + 2] << 16) | (buf[i + 3] << 24)) >>> (off & 7);
+    return v & ((1 << n) - 1);
+  }
+
+  // Обратный битовый поток (FSE / Huffman): читаем от конца к началу
+  class BackReader {
+    constructor(buf, start, end) {
+      this.buf = buf; this.base = start;
+      const last = buf[end - 1];
+      if (!last) throw new Error("zstd: пустой маркер потока");
+      this.off = (end - start - 1) * 8 + hb(last);
+    }
+    read(n) {
+      if (n === 0) return 0;
+      if (n > 24) { const hi = this.read(n - 16); return hi * 65536 + this.read(16); }
+      this.off -= n;
+      if (this.off >= 0) return peek(this.buf, this.base, this.off, n);
+      if (this.off > -n) return peek(this.buf, this.base, 0, n + this.off) << -this.off;
+      return 0;
+    }
+  }
+
+  // ---------- FSE
+  function readFseHeader(buf, start, maxAL) {
+    let off = 0;
+    const AL = peek(buf, start, off, 4) + 5; off += 4;
+    if (AL > maxAL) throw new Error("zstd: слишком большой accuracy log");
+    let remaining = 1 << AL;
+    const freqs = [];
+    while (remaining > 0 && freqs.length < 256) {
+      const bits = hb(remaining + 1) + 1;
+      let val = peek(buf, start, off, bits);
+      const lower = (1 << (bits - 1)) - 1;
+      const threshold = (1 << bits) - 1 - (remaining + 1);
+      if ((val & lower) < threshold) { off += bits - 1; val &= lower; }
+      else if (val > lower) { off += bits; val -= threshold; }
+      else off += bits;
+      const p = val - 1;
+      remaining -= p < 0 ? -p : p;
+      freqs.push(p);
+      if (p === 0) {
+        let rep = peek(buf, start, off, 2); off += 2;
+        for (;;) {
+          for (let i = 0; i < rep; i++) freqs.push(0);
+          if (rep === 3) { rep = peek(buf, start, off, 2); off += 2; } else break;
+        }
+      }
+    }
+    if (remaining !== 0) throw new Error("zstd: битая FSE-таблица");
+    return { table: buildFse(freqs, AL), size: (off + 7) >>> 3 };
+  }
+
+  function buildFse(freqs, AL) {
+    const size = 1 << AL;
+    const sym = new Uint8Array(size), nb = new Uint8Array(size), base = new Uint16Array(size);
+    const next = new Uint16Array(freqs.length);
+    let high = size;
+    for (let s = 0; s < freqs.length; s++) if (freqs[s] === -1) { sym[--high] = s; next[s] = 1; }
+    const step = (size >>> 1) + (size >>> 3) + 3, mask = size - 1;
+    let pos = 0;
+    for (let s = 0; s < freqs.length; s++) {
+      if (freqs[s] <= 0) continue;
+      next[s] = freqs[s];
+      for (let i = 0; i < freqs[s]; i++) {
+        sym[pos] = s;
+        do { pos = (pos + step) & mask; } while (pos >= high);
+      }
+    }
+    for (let i = 0; i < size; i++) {
+      const s = sym[i], n = next[s]++;
+      nb[i] = AL - hb(n);
+      base[i] = (n << nb[i]) - size;
+    }
+    return { AL, sym, nb, base };
+  }
+
+  const rleTable = (s) => ({ AL: 0, sym: Uint8Array.of(s), nb: Uint8Array.of(0), base: Uint16Array.of(0) });
+
+  const LL_DEF = buildFse([4,3,2,2,2,2,2,2,2,2,2,2,2,1,1,1,2,2,2,2,2,2,2,2,2,3,2,1,1,1,1,1,-1,-1,-1,-1], 6);
+  const ML_DEF = buildFse([1,4,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,-1,-1,-1,-1], 6);
+  const OF_DEF = buildFse([1,1,1,1,1,1,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,-1,-1], 5);
+
+  const LL_BASE = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,18,20,22,24,28,32,40,48,64,128,256,512,1024,2048,4096,8192,16384,32768,65536];
+  const LL_BITS = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,6,7,8,9,10,11,12,13,14,15,16];
+  const ML_BASE = []; const ML_BITS = [];
+  for (let i = 0; i < 32; i++) { ML_BASE.push(i + 3); ML_BITS.push(0); }
+  [[35,1],[37,1],[39,1],[41,1],[43,2],[47,2],[51,3],[59,3],[67,4],[83,4],[99,5],[131,7],[259,8],[515,9],[1027,10],[2051,11],[4099,12],[8195,13],[16387,14],[32771,15],[65539,16]]
+    .forEach(([b, n]) => { ML_BASE.push(b); ML_BITS.push(n); });
+
+  // ---------- Huffman
+  function readHuffTable(buf, p) {
+    const h = buf[p++];
+    let weights;
+    if (h < 128) {
+      const { table, size } = readFseHeader(buf, p, 6);
+      const r = new BackReader(buf, p + size, p + h);
+      weights = [];
+      let s1 = r.read(table.AL), s2 = r.read(table.AL);
+      for (;;) {
+        weights.push(table.sym[s1]); s1 = table.base[s1] + r.read(table.nb[s1]);
+        if (r.off < 0) { weights.push(table.sym[s2]); break; }
+        weights.push(table.sym[s2]); s2 = table.base[s2] + r.read(table.nb[s2]);
+        if (r.off < 0) { weights.push(table.sym[s1]); break; }
+        if (weights.length > 255) throw new Error("zstd: слишком много весов Huffman");
+      }
+      p += h;
+    } else {
+      const n = h - 127; weights = new Array(n);
+      for (let i = 0; i < n; i++) weights[i] = i & 1 ? buf[p + (i >> 1)] & 15 : buf[p + (i >> 1)] >> 4;
+      p += (n + 1) >> 1;
+    }
+    let sum = 0;
+    for (const w of weights) if (w > 0) sum += 1 << (w - 1);
+    const maxBits = hb(sum) + 1;
+    const left = (1 << maxBits) - sum;
+    weights.push(hb(left) + 1);
+    const size = 1 << maxBits;
+    const sym = new Uint8Array(size), nbits = new Uint8Array(size);
+    const bits = weights.map((w) => (w > 0 ? maxBits + 1 - w : 0));
+    const count = new Array(maxBits + 2).fill(0);
+    bits.forEach((b) => count[b]++);
+    const idx = new Array(maxBits + 2).fill(0);
+    idx[maxBits] = 0;
+    for (let i = maxBits; i >= 1; i--) {
+      idx[i - 1] = idx[i] + count[i] * (1 << (maxBits - i));
+      nbits.fill(i, idx[i], idx[i - 1]);
+    }
+    for (let s = 0; s < bits.length; s++) {
+      if (!bits[s]) continue;
+      const len = 1 << (maxBits - bits[s]);
+      sym.fill(s, idx[bits[s]], idx[bits[s]] + len);
+      idx[bits[s]] += len;
+    }
+    return { pos: p, huf: { maxBits, sym, nbits } };
+  }
+
+  function huffStream(buf, start, end, huf, out, op, n) {
+    const r = new BackReader(buf, start, end);
+    const { maxBits, sym, nbits } = huf, mask = (1 << maxBits) - 1;
+    let state = r.read(maxBits);
+    for (let i = 0; i < n; i++) {
+      out[op + i] = sym[state];
+      const b = nbits[state];
+      state = ((state << b) | r.read(b)) & mask;
+    }
+  }
+
+  // ---------- распаковка
+  function decompress(src) {
+    let out = new Uint8Array(Math.max(1 << 16, src.length * 8)), op = 0;
+    const ensure = (n) => {
+      if (op + n <= out.length) return;
+      let len = out.length * 2; while (len < op + n) len *= 2;
+      const o = new Uint8Array(len); o.set(out.subarray(0, op)); out = o;
+    };
+    const u32 = (p) => (src[p] | (src[p + 1] << 8) | (src[p + 2] << 16) | (src[p + 3] << 24)) >>> 0;
+    let ip = 0;
+    while (ip + 4 <= src.length) {
+      const magic = u32(ip); ip += 4;
+      if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) { ip += 4 + u32(ip); continue; }
+      if (magic !== 0xfd2fb528) throw new Error("zstd: неверная сигнатура кадра");
+      const fhd = src[ip++];
+      const fcsFlag = fhd >> 6, single = (fhd >> 5) & 1, checksum = (fhd >> 2) & 1, dictFlag = fhd & 3;
+      if (!single) ip++;
+      if (dictFlag) throw new Error("zstd: словари не поддерживаются");
+      const fcsSize = fcsFlag === 0 ? single : [1, 2, 4, 8][fcsFlag];
+      if (fcsSize) {
+        let fcs = 0;
+        for (let i = fcsSize - 1; i >= 0; i--) fcs = fcs * 256 + src[ip + i];
+        if (fcsSize === 2) fcs += 256;
+        if (fcs < 2 ** 31) ensure(fcs);
+      }
+      ip += fcsSize;
+      const st = { rep: [1, 4, 8], huf: null, ll: null, of: null, ml: null };
+      let last = 0;
+      while (!last) {
+        const bh = src[ip] | (src[ip + 1] << 8) | (src[ip + 2] << 16); ip += 3;
+        last = bh & 1;
+        const type = (bh >> 1) & 3, size = bh >>> 3;
+        if (type === 0) { ensure(size); out.set(src.subarray(ip, ip + size), op); op += size; ip += size; }
+        else if (type === 1) { ensure(size); out.fill(src[ip], op, op + size); op += size; ip += 1; }
+        else if (type === 2) { block(ip, ip + size, st); ip += size; }
+        else throw new Error("zstd: зарезервированный тип блока");
+      }
+      if (checksum) ip += 4;
+    }
+    return out.subarray(0, op);
+
+    function block(p, end, st) {
+      // --- литералы
+      const b0 = src[p], ltype = b0 & 3, sf = (b0 >> 2) & 3;
+      let lit;
+      if (ltype < 2) {
+        let regen, hs;
+        if (sf === 0 || sf === 2) { regen = b0 >> 3; hs = 1; }
+        else if (sf === 1) { regen = (b0 >> 4) + (src[p + 1] << 4); hs = 2; }
+        else { regen = (b0 >> 4) + (src[p + 1] << 4) + (src[p + 2] << 12); hs = 3; }
+        p += hs;
+        if (ltype === 0) { lit = src.subarray(p, p + regen); p += regen; }
+        else { lit = new Uint8Array(regen).fill(src[p]); p += 1; }
+      } else {
+        let regen, comp, hs, streams;
+        if (sf < 2) {
+          streams = sf === 0 ? 1 : 4; hs = 3;
+          const h = b0 | (src[p + 1] << 8) | (src[p + 2] << 16);
+          regen = (h >> 4) & 0x3ff; comp = (h >> 14) & 0x3ff;
+        } else {
+          streams = 4; hs = sf === 2 ? 4 : 5;
+          const h = (b0 | (src[p + 1] << 8) | (src[p + 2] << 16) | (src[p + 3] << 24)) >>> 0;
+          if (sf === 2) { regen = (h >>> 4) & 0x3fff; comp = (h >>> 18) & 0x3fff; }
+          else { regen = (h >>> 4) & 0x3ffff; comp = ((h >>> 22) | (src[p + 4] << 10)) & 0x3ffff; }
+        }
+        p += hs;
+        const lend = p + comp;
+        let q = p;
+        if (ltype === 2) { const r = readHuffTable(src, q); q = r.pos; st.huf = r.huf; }
+        if (!st.huf) throw new Error("zstd: нет таблицы Huffman");
+        lit = new Uint8Array(regen);
+        if (streams === 1) huffStream(src, q, lend, st.huf, lit, 0, regen);
+        else {
+          const s1 = src[q] | (src[q + 1] << 8), s2 = src[q + 2] | (src[q + 3] << 8), s3 = src[q + 4] | (src[q + 5] << 8);
+          q += 6;
+          const seg = (regen + 3) >> 2;
+          const a = q, b = a + s1, c = b + s2, d = c + s3;
+          huffStream(src, a, b, st.huf, lit, 0, seg);
+          huffStream(src, b, c, st.huf, lit, seg, seg);
+          huffStream(src, c, d, st.huf, lit, seg * 2, seg);
+          huffStream(src, d, lend, st.huf, lit, seg * 3, regen - seg * 3);
+        }
+        p = lend;
+      }
+      // --- последовательности
+      let nseq = src[p++];
+      if (nseq >= 128) {
+        if (nseq < 255) nseq = ((nseq - 128) << 8) + src[p++];
+        else { nseq = src[p] + (src[p + 1] << 8) + 0x7f00; p += 2; }
+      }
+      if (nseq === 0) { ensure(lit.length); out.set(lit, op); op += lit.length; return; }
+      const modes = src[p++];
+      const pick = (mode, def, maxAL, key) => {
+        if (mode === 0) st[key] = def;
+        else if (mode === 1) st[key] = rleTable(src[p++]);
+        else if (mode === 2) { const r = readFseHeader(src, p, maxAL); st[key] = r.table; p += r.size; }
+        else if (!st[key]) throw new Error("zstd: повтор несуществующей таблицы");
+      };
+      pick(modes >> 6, LL_DEF, 9, "ll");
+      pick((modes >> 4) & 3, OF_DEF, 8, "of");
+      pick((modes >> 2) & 3, ML_DEF, 9, "ml");
+      const LL = st.ll, OF = st.of, ML = st.ml, rep = st.rep;
+      const r = new BackReader(src, p, end);
+      let ls = r.read(LL.AL), os = r.read(OF.AL), ms = r.read(ML.AL);
+      let lp = 0;
+      for (let i = 0; i < nseq; i++) {
+        const oc = OF.sym[os], lc = LL.sym[ls], mc = ML.sym[ms];
+        const ov = 2 ** oc + r.read(oc);
+        const ml = ML_BASE[mc] + r.read(ML_BITS[mc]);
+        const ll = LL_BASE[lc] + r.read(LL_BITS[lc]);
+        let off;
+        if (ov > 3) { off = ov - 3; rep[2] = rep[1]; rep[1] = rep[0]; rep[0] = off; }
+        else {
+          let idx = ov - 1; if (ll === 0) idx++;
+          if (idx === 0) off = rep[0];
+          else {
+            off = idx < 3 ? rep[idx] : rep[0] - 1;
+            if (idx > 1) rep[2] = rep[1];
+            rep[1] = rep[0]; rep[0] = off;
+          }
+        }
+        if (i < nseq - 1) {
+          ls = LL.base[ls] + r.read(LL.nb[ls]);
+          ms = ML.base[ms] + r.read(ML.nb[ms]);
+          os = OF.base[os] + r.read(OF.nb[os]);
+        }
+        ensure(ll + ml);
+        out.set(lit.subarray(lp, lp + ll), op); op += ll; lp += ll;
+        if (off > op) throw new Error("zstd: ссылка за пределы окна");
+        let from = op - off;
+        if (off >= ml) { out.copyWithin(op, from, from + ml); op += ml; }
+        else for (let k = 0; k < ml; k++) out[op++] = out[from++];
+      }
+      const rest = lit.length - lp;
+      ensure(rest); out.set(lit.subarray(lp), op); op += rest;
+    }
+  }
+
+  return { decompress };
+})();
+
+</script>
+<script id="core-src">
+// Ядро «Раскроя»: HAR → документ Pixso (Kiwi) → дерево фрейма → описание для LLM.
+// Работает в Web Worker (и в Node для тестов). Зависит от ZSTD (zstd.js).
+
+const CORE = (() => {
+  const utf8 = new TextDecoder();
+
+  // ---------------------------------------------------------------- Kiwi
+  const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
+  class R {
+    constructor(b) { this.b = b; this.p = 0; }
+    vu() { let r = 0, sh = 0, c; do { c = this.b[this.p++]; r |= (c & 127) << sh; sh += 7; } while (c & 128 && sh < 35); return r >>> 0; }
+    vi() { const v = this.vu(); return v & 1 ? ~(v >>> 1) : v >>> 1; }
+    vu64() { let r = 0, m = 1, c; do { c = this.b[this.p++]; r += (c & 127) * m; m *= 128; } while (c & 128 && m < 2 ** 63); return r; }
+    vi64() { const v = this.vu64(); return v % 2 ? -(v + 1) / 2 : v / 2; }
+    flt() {
+      const b = this.b, p = this.p;
+      if (b[p] === 0) { this.p++; return 0; }
+      const bits = (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
+      this.p += 4; u32[0] = ((bits << 23) | (bits >>> 9)) >>> 0; return f32[0];
+    }
+    str() { const e = this.b.indexOf(0, this.p); const s = utf8.decode(this.b.subarray(this.p, e)); this.p = e + 1; return s; }
+  }
+  const NAT = { [-1]: "bool", [-2]: "byte", [-3]: "int", [-4]: "uint", [-5]: "float", [-6]: "string", [-7]: "int64", [-8]: "uint64" };
+
+  function parseSchema(b) {
+    const r = new R(b), n = r.vu(), defs = [];
+    for (let i = 0; i < n; i++) {
+      const name = r.str(), kind = r.b[r.p++], fc = r.vu(), fields = [];
+      for (let j = 0; j < fc; j++) { const fn = r.str(), t = r.vi(), arr = r.b[r.p++] !== 0, val = r.vu(); fields.push({ name: fn, t, arr, val }); }
+      defs.push({ name, kind, fields });
+    }
+    const off = defs.length && defs[0].name === "schemaInfo" ? 1 : 0; // у Pixso индексы типов сдвинуты на служебный schemaInfo
+    const S = {};
+    for (const d of defs) {
+      d.byVal = [];
+      for (const f of d.fields) { f.type = NAT[f.t] || defs[f.t + off].name; d.byVal[f.val] = f; }
+      S[d.name] = d;
+    }
+    S.__version = defs[0] && defs[0].name === "schemaInfo" ? defs[0].fields[0]?.name : "";
+    S.__count = defs.length;
+    return S;
+  }
+
+  function decodeMessage(S, buf, root) {
+    const r = new R(buf);
+    const val = (t) => {
+      switch (t) {
+        case "bool": return r.b[r.p++] !== 0;
+        case "byte": return r.b[r.p++];
+        case "int": return r.vi();
+        case "uint": return r.vu();
+        case "float": return r.flt();
+        case "string": return r.str();
+        case "int64": return r.vi64();
+        case "uint64": return r.vu64();
+        default: return dec(t);
+      }
+    };
+    const field = (f) => {
+      if (!f.arr) return val(f.type);
+      const n = r.vu();
+      if (f.type === "byte") { const v = r.b.subarray(r.p, r.p + n); r.p += n; return v; }
+      const a = new Array(n); for (let i = 0; i < n; i++) a[i] = val(f.type); return a;
+    };
+    const dec = (tn) => {
+      const d = S[tn];
+      if (d.kind === 0) { const v = r.vu(); const f = d.byVal[v]; return f ? f.name : v; }
+      const o = {};
+      if (d.kind === 1) { for (const f of d.fields) o[f.name] = field(f); return o; }
+      for (;;) {
+        const k = r.vu();
+        if (k === 0) return o;
+        const f = d.byVal[k];
+        if (!f) throw new Error(`Kiwi: неизвестное поле ${k} в ${tn}`);
+        o[f.name] = field(f);
+      }
+    };
+    return dec(root);
+  }
+
+  // ---------------------------------------------------------------- HAR
+  function b64(s) { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+
+  async function unzip(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let e = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) throw new Error("Это не zip-архив. Перетащите .har или .zip с .har внутри.");
+    const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+    for (let k = 0; k < n; k++) {
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+      const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+      const name = utf8.decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl;
+      if (!/\.har$/i.test(name) || /(^|\/)(__MACOSX|\._)/.test(name)) continue;
+      const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+      const data = u8.subarray(start, start + csize);
+      if (method === 0) return { name, data };
+      if (method !== 8) throw new Error("В zip используется неподдерживаемое сжатие. Пересожмите архив обычным zip.");
+      const ds = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return { name, data: new Uint8Array(await new Response(ds).arrayBuffer()) };
+    }
+    throw new Error("В архиве нет файла .har.");
+  }
+
+  async function loadHar(u8, progress = () => {}) {
+    let fileName = null;
+    if (u8[0] === 0x50 && u8[1] === 0x4b) {
+      progress("zip", "распаковываю архив");
+      const z = await unzip(u8); u8 = z.data; fileName = z.name;
+    }
+    progress("har", `${(u8.length / 1048576).toFixed(1)} МБ JSON`);
+    let har;
+    try { har = JSON.parse(utf8.decode(u8)); } catch (e) { throw new Error("Файл не читается как HAR (JSON). Сохраните его через DevTools → Network → «Save all as HAR with content»."); }
+    const entries = har?.log?.entries;
+    if (!entries) throw new Error("В файле нет log.entries — это не HAR.");
+    let schema = null, doc = null, docRaw = 0, pageUrl = null;
+    const images = {};
+    for (const e of entries) {
+      const url = e.request?.url || "", c = e.response?.content || {};
+      if (!pageUrl && url.includes("/app/design/")) pageUrl = url;
+      if (/\/pixso\.binary(\?|$)/.test(url) && c.text) schema = c.encoding === "base64" ? b64(c.text) : new TextEncoder().encode(c.text);
+      const m = url.match(/\/image-url\/([0-9a-f]{40})/);
+      if (m && c.text && (c.mimeType || "").startsWith("image/") && c.encoding === "base64") images[m[1]] = `data:${c.mimeType};base64,${c.text}`;
+      for (const msg of e._webSocketMessages || []) {
+        if (msg.type !== "receive" || msg.opcode !== 2 || msg.data.length < 64) continue;
+        if (!msg.data.startsWith("cGl4c28ta3")) continue; // base64("pixso-kw")
+        if (msg.data.length > docRaw) { docRaw = msg.data.length; doc = msg.data; }
+      }
+    }
+    if (!schema) throw new Error("В HAR нет схемы Pixso (/app/pixso.binary). Включите Preserve log, обновите страницу с Ctrl+Shift+R и сохраните HAR «with content».");
+    if (!doc) throw new Error("В HAR нет документа (WebSocket /ws/coop). Включите Preserve log, обновите страницу и дождитесь, пока макет отрисуется, затем сохраните HAR.");
+    const S = parseSchema(schema);
+    progress("schema", `Kiwi ${S.__version || "?"} · ${S.__count} типов`);
+    const raw = b64(doc);
+    let body;
+    const z = raw.indexOf(0x28, 8);
+    const head = utf8.decode(raw.subarray(0, 20));
+    if (head.includes("ZSTD")) {
+      let i = 8; while (i < raw.length - 4 && !(raw[i] === 0x28 && raw[i + 1] === 0xb5 && raw[i + 2] === 0x2f && raw[i + 3] === 0xfd)) i++;
+      body = ZSTD.decompress(raw.subarray(i));
+    } else {
+      const i = head.indexOf("NONE"); body = raw.subarray(i + 4 + 10);
+    }
+    void z;
+    progress("doc", `${(raw.length / 1048576).toFixed(1)} → ${(body.length / 1048576).toFixed(1)} МБ`);
+    const msg = decodeMessage(S, body, "PixsoMsg");
+    const scene = new Scene(msg);
+    progress("nodes", `${scene.nodes.size.toLocaleString("ru-RU")} слоёв`);
+    return { scene, images, pageUrl, fileName, meta: { schema: S.__version, created: msg.createVersion, nodes: scene.nodes.size, docMB: body.length / 1048576 } };
+  }
+
+  // ---------------------------------------------------------------- сцена
+  const gid = (x) => (x ? `${x.sessionID || 0}:${x.localID || 0}` : "0:0");
+
+  class Scene {
+    constructor(msg) {
+      this.nodes = new Map(); this.kids = new Map(); this.blobs = msg.blobs || [];
+      for (const n of msg.pixsoNodes) {
+        if (n.phase === "REMOVED") continue;
+        this.nodes.set(gid(n.guid), n);
+        if (n.parentIndex) {
+          const p = gid(n.parentIndex.guid);
+          if (!this.kids.has(p)) this.kids.set(p, []);
+          this.kids.get(p).push(n);
+        }
+      }
+      const pos = (n) => n.parentIndex.position || "";
+      for (const k of this.kids.values()) k.sort((a, b) => (pos(a) < pos(b) ? -1 : pos(a) > pos(b) ? 1 : 0));
+      this.pathCache = new Map();
+    }
+    children(id) { return this.kids.get(id) || []; }
+    crumbs(id) {
+      const out = []; let n = this.nodes.get(id);
+      while (n && n.parentIndex) { n = this.nodes.get(gid(n.parentIndex.guid)); if (n && n.type !== "DOCUMENT") out.unshift(n.name || ""); }
+      return out;
+    }
+    pages() {
+      const pages = [];
+      for (const p of this.children("0:0")) {
+        if (p.type !== "CANVAS" || p.internalOnly || p.name === "Internal Only Canvas") continue;
+        const frames = [];
+        for (const f of this.children(gid(p.guid))) {
+          if (!["FRAME", "SECTION", "SYMBOL", "INSTANCE", "GROUP"].includes(f.type) || f.visible === false) continue;
+          frames.push(frameInfo(f, 0));
+          if (f.type === "SECTION") for (const c of this.children(gid(f.guid))) if (["FRAME", "SYMBOL", "INSTANCE"].includes(c.type)) frames.push(frameInfo(c, 1));
+        }
+        pages.push({ id: gid(p.guid), name: p.name || "Без названия", frames });
+      }
+      return pages;
+      function frameInfo(f, depth) { return { id: gid(f.guid), name: f.name || f.type, type: f.type, w: num(f.size?.x), h: num(f.size?.y), depth }; }
+    }
+    path(blobIndex) {
+      if (this.pathCache.has(blobIndex)) return this.pathCache.get(blobIndex);
+      const blob = this.blobs[blobIndex]?.bytes;
+      let d = "";
+      if (blob) {
+        const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+        const n = { 0: 0, 1: 2, 2: 2, 3: 4, 4: 6 }, cmd = { 0: "Z", 1: "M", 2: "L", 3: "Q", 4: "C" };
+        let p = 0; const parts = [];
+        while (p < blob.length) {
+          const c = blob[p++]; const k = n[c];
+          if (k === undefined) break;
+          const a = []; for (let i = 0; i < k; i++) { a.push(+dv.getFloat32(p, true).toFixed(2)); p += 4; }
+          parts.push(cmd[c] + a.join(" "));
+        }
+        d = parts.join("");
+      }
+      this.pathCache.set(blobIndex, d);
+      return d;
+    }
+  }
+
+  // ---------------------------------------------------------------- форматирование
+  function num(v) { if (v === undefined || v === null || Number.isNaN(v)) return undefined; const r = Math.round(v * 100) / 100; return Object.is(r, -0) ? 0 : r; }
+  const hex2 = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).toUpperCase().padStart(2, "0");
+  function hexcolor(c = {}, opacity = 1) {
+    const a = ((c.a ?? 255) / 255) * (opacity ?? 1);
+    const h = `#${hex2(c.r || 0)}${hex2(c.g || 0)}${hex2(c.b || 0)}`;
+    return a >= 0.999 ? h : h + hex2(a * 255);
+  }
+  function paints(ps, images) {
+    const out = [];
+    for (const p of ps || []) {
+      if (p.visible === false) continue;
+      const t = p.type || "";
+      if (t === "SOLID") out.push(hexcolor(p.color, p.opacity));
+      else if (t.startsWith("GRADIENT")) {
+        const stops = (p.stops || []).map((s) => `${hexcolor(s.color, p.opacity)} ${num((s.position || 0) * 100)}%`).join(", ");
+        out.push(`${t.toLowerCase().replace("gradient_", "")}-gradient(${stops})`);
+      } else if (t === "IMAGE") {
+        const h = p.image?.hash ? Array.from(p.image.hash, (b) => b.toString(16).padStart(2, "0")).join("") : "?";
+        if (images) images.add(h);
+        out.push(`image(${h}, ${String(p.imageScaleMode || "FILL").toLowerCase()})`);
+      } else out.push(t.toLowerCase());
+    }
+    return out;
+  }
+  function effects(es) {
+    const out = [];
+    for (const e of es || []) {
+      if (e.visible === false) continue;
+      const t = e.type || "";
+      if (t.includes("SHADOW")) { const o = e.offset || {}; out.push(`${t.startsWith("INNER") ? "inset " : ""}${num(o.x || 0)} ${num(o.y || 0)} ${num(e.radius || 0)} ${num(e.spread || 0) || 0} ${hexcolor(e.color)}`); }
+      else if (t.includes("BLUR")) out.push(`${t.toLowerCase()}(${num(e.radius || 0)})`);
+    }
+    return out;
+  }
+  const WEIGHT = { thin: 100, hairline: 100, extralight: 200, ultralight: 200, light: 300, regular: 400, normal: 400, book: 400, medium: 500, semibold: 600, demibold: 600, bold: 700, extrabold: 800, ultrabold: 800, heavy: 900, black: 900 };
+  const weightOf = (style = "") => WEIGHT[style.toLowerCase().replace(/[\s-]|italic/g, "")] || 400;
+
+  // ---------------------------------------------------------------- раскрытие инстансов
+  const SKIP = new Set(["guid", "guidPath", "parentIndex", "overrideKey"]);
+  function merged(node, ov) {
+    if (!ov) return node;
+    const n = Object.assign({}, node);
+    for (const k in ov) {
+      if (SKIP.has(k)) continue;
+      if (k === "textData" && n.textData) n.textData = Object.assign({}, n.textData, ov.textData);
+      else n[k] = ov[k];
+    }
+    return n;
+  }
+  function applyProps(n, props) {
+    const refs = n.componentPropRef;
+    if (!refs || !refs.length || !props) return n;
+    n = Object.assign({}, n);
+    for (const ref of refs) {
+      if (ref.isDeleted) continue;
+      const v = props.get(gid(ref.defID)); if (!v) continue;
+      const f = ref.componentPropNodeField;
+      if (f === "TEXT_DATA" && v.textValue) { n.textData = Object.assign({}, n.textData, { characters: v.textValue.characters ?? n.textData?.characters ?? "" }); delete n.textData.characterStyleIDs; }
+      else if (f === "VISIBLE" && "boolValue" in v) n.visible = v.boolValue;
+      else if (f === "OVERRIDDEN_SYMBOL_ID" && v.guidValue) n.overriddenSymbolID = v.guidValue;
+    }
+    return n;
+  }
+  const VECTORISH = new Set(["VECTOR", "BOOLEAN_OPERATION", "STAR", "REGULAR_POLYGON", "LINE"]);
+
+  function buildFrame(scene, id, opts = {}) {
+    const o = Object.assign({ depth: 14, hidden: false }, opts);
+    const root = scene.nodes.get(id);
+    if (!root) throw new Error(`Слой ${id} не найден`);
+    const usedImages = new Set();
+    const tree = build(root, new Map(), null, 0, null);
+    return { tree, usedImages };
+
+    function build(n, ctx, prefix, depth, props) {
+      n = applyProps(n, props);
+      let key = null;
+      if (prefix !== null) {
+        const me = [gid(n.guid), gid(n.overrideKey || n.guid)];
+        key = prefix.concat([me]);
+        const kg = key.map((x) => x[0]).join("/"), ko = key.map((x) => x[1]).join("/");
+        n = merged(n, ctx.get(kg) || ctx.get(ko));
+      }
+      if (n.visible === false && !o.hidden) return null;
+      const t = n.type;
+      const out = { type: t, name: n.name || "", id: gid(n.guid) };
+      const tr = n.transform, sz = n.size;
+      if (tr) {
+        out.x = num(tr.m02 || 0); out.y = num(tr.m12 || 0);
+        if (Math.abs(tr.m01 || 0) > 1e-3 || Math.abs((tr.m00 ?? 1) - 1) > 1e-3 || Math.abs((tr.m11 ?? 1) - 1) > 1e-3) {
+          out.m = [tr.m00 ?? 1, tr.m10 || 0, tr.m01 || 0, tr.m11 ?? 1, tr.m02 || 0, tr.m12 || 0].map((v) => +v.toFixed(4));
+          out.rotate = num((Math.atan2(tr.m10 || 0, tr.m00 ?? 1) * 180) / Math.PI);
+        }
+      }
+      if (sz) { out.w = num(sz.x); out.h = num(sz.y); }
+      if (n.visible === false) out.hidden = true;
+      if ((n.opacity ?? 1) < 0.999) out.opacity = num(n.opacity);
+
+      const sm = n.stackMode;
+      if (sm === "HORIZONTAL" || sm === "VERTICAL") {
+        const L = { dir: sm === "HORIZONTAL" ? "row" : "column", gap: num(n.stackSpacing || 0) };
+        const pads = ["stackPaddingTop", "stackPaddingRight", "stackPaddingBottom", "stackPaddingLeft"].map((k) => num(n[k] || 0) || 0);
+        if (pads.some(Boolean)) L.padding = pads;
+        if (n.stackPrimaryAlignItems && n.stackPrimaryAlignItems !== "MIN") L.justify = n.stackPrimaryAlignItems.toLowerCase();
+        if (n.stackCounterAlignItems && n.stackCounterAlignItems !== "MIN") L.align = n.stackCounterAlignItems.toLowerCase();
+        if (n.stackWrap === "WRAP") L.wrap = true;
+        L.sizing = { main: String(n.stackPrimarySizing || "FIXED").toLowerCase(), cross: String(n.stackCounterSizing || "FIXED").toLowerCase() };
+        out.layout = L;
+      }
+      const child = {};
+      if (n.stackChildPrimarySizing === "FILL") child.grow = true;
+      if (n.stackChildCounterSizing === "FILL") child.stretch = true;
+      if (n.autoLayoutAbsolutePos) child.absolute = true;
+      if (Object.keys(child).length) out.child = child;
+
+      if (t !== "TEXT") { const f = paints(n.fillPaints, usedImages); if (f.length) out.fill = f; }
+      const s = paints(n.strokePaints);
+      if (s.length && n.strokeWeight) {
+        out.stroke = { color: s, weight: num(n.strokeWeight), align: String(n.strokeAlign || "INSIDE").toLowerCase() };
+        if (n.borderStrokeWeightsIndependent) out.stroke.sides = ["borderTopWeight", "borderRightWeight", "borderBottomWeight", "borderLeftWeight"].map((k) => num(n[k] || 0));
+        if (n.dashPattern && n.dashPattern.length) out.stroke.dash = n.dashPattern.map(num);
+      }
+      if (n.rectangleCornerRadiiIndependent) {
+        const rr = ["rectangleTopLeftCornerRadius", "rectangleTopRightCornerRadius", "rectangleBottomRightCornerRadius", "rectangleBottomLeftCornerRadius"].map((k) => num(n[k] || 0));
+        if (rr.some(Boolean)) out.radius = rr;
+      } else if (n.cornerRadius) out.radius = num(n.cornerRadius);
+      const ef = effects(n.effects); if (ef.length) out.shadow = ef;
+      for (const [k, lab] of [["inheritFillStyleID", "fillStyle"], ["inheritStrokeStyleID", "strokeStyle"], ["inheritEffectStyleID", "effectStyle"], ["inheritTextStyleID", "textStyle"]]) {
+        if (!n[k]) continue; const sn = scene.nodes.get(gid(n[k])); if (sn && sn.name) out[lab] = sn.name;
+      }
+      if (n.frameMaskDisabled === false && (t === "FRAME" || t === "INSTANCE" || t === "SYMBOL")) out.clip = true;
+      if (VECTORISH.has(t)) {
+        const fp = (n.fillGeometry || []).map((g) => ({ d: scene.path(g.blobIndex), rule: g.windingRule === "ODD" ? "evenodd" : "nonzero" })).filter((g) => g.d);
+        const sp = (n.strokeGeometry || []).map((g) => ({ d: scene.path(g.blobIndex), rule: g.windingRule === "ODD" ? "evenodd" : "nonzero" })).filter((g) => g.d);
+        if (fp.length) out.paths = fp;
+        if (sp.length && s.length) out.strokePaths = sp;
+      }
+
+      if (t === "TEXT") {
+        if (n.inheritTextStyleID) {
+          const sty = scene.nodes.get(gid(n.inheritTextStyleID));
+          if (sty) { n = Object.assign({}, n); for (const k of ["fontName", "fontSize", "lineHeight", "letterSpacing", "textCase", "textDecoration"]) if (!(k in n) && k in sty) n[k] = sty[k]; }
+        }
+        const fontSize = n.fontSize ?? 14; // Pixso не сериализует значение по умолчанию (14)
+        const td = n.textData || {};
+        out.text = td.characters || "";
+        const fn = n.fontName || {};
+        const st = { font: `${fn.family || ""} ${fn.style || ""}`.trim(), family: fn.family || "", weight: weightOf(fn.style), italic: /italic/i.test(fn.style || ""), size: num(fontSize) };
+        const lh = n.lineHeight;
+        if (lh && lh.units === "PIXELS") st.lineHeight = num(lh.value);
+        else if (lh && lh.units === "PERCENT" && lh.value !== 100) st.lineHeight = `${num(lh.value)}%`;
+        const ls = n.letterSpacing;
+        if (ls && ls.value) st.letterSpacing = `${num(ls.value)}${ls.units === "PERCENT" ? "%" : "px"}`;
+        const c = paints(n.fillPaints);
+        if (c.length) st.color = c.length === 1 ? c[0] : c;
+        if (n.textAlignHorizontal && n.textAlignHorizontal !== "LEFT") st.align = n.textAlignHorizontal.toLowerCase();
+        if (n.textAlignVertical && n.textAlignVertical !== "TOP") st.valign = n.textAlignVertical.toLowerCase();
+        if (n.textCase && n.textCase !== "ORIGINAL") st.case = n.textCase.toLowerCase();
+        if (n.textDecoration && n.textDecoration !== "NONE") st.decoration = n.textDecoration.toLowerCase();
+        if (n.textAutoResize) st.autoResize = n.textAutoResize.toLowerCase();
+        const ids = td.characterStyleIDs || [], table = new Map((td.styleOverrideTable || []).map((x) => [x.styleID, x]));
+        if (ids.length && ids.some(Boolean) && table.size) {
+          const segs = []; let cur = ids[0], start = 0;
+          for (let i = 0; i <= ids.length; i++) {
+            const v = i < ids.length ? ids[i] : null;
+            if (v !== cur) {
+              const seg = { text: out.text.slice(start, i) };
+              const x = cur ? table.get(cur) : null;
+              if (x) {
+                if (x.fontName) { seg.font = `${x.fontName.family || ""} ${x.fontName.style || ""}`.trim(); seg.family = x.fontName.family; seg.weight = weightOf(x.fontName.style); }
+                if (x.fontSize) seg.size = num(x.fontSize);
+                if (x.fillPaints) seg.color = paints(x.fillPaints)[0];
+                if (x.textDecoration) seg.decoration = x.textDecoration.toLowerCase();
+              }
+              segs.push(seg); cur = v; start = i;
+            }
+          }
+          if (segs.some((sg) => Object.keys(sg).length > 1)) st.runs = segs;
+        }
+        out.textStyle_ = st;
+      }
+
+      const kids = [];
+      if (t === "INSTANCE") {
+        const sd = n.symbolData || {};
+        const symId = gid(n.overriddenSymbolID || sd.symbolID);
+        const sym = scene.nodes.get(symId);
+        if (sym) {
+          const par = scene.nodes.get(gid(sym.parentIndex?.guid));
+          out.component = par && par.isStateGroup ? `${par.name || ""} / ${sym.name || ""}` : sym.name || "";
+          // derivedSymbolData < overrides этого инстанса < overrides внешних инстансов
+          const inner = key || [];
+          const ig = inner.map((x) => x[0]);
+          const own = new Map();
+          const derived = (n.derivedSymbolData || []).map((d) => ({ guidPath: d.guidPath, size: d.size, transform: d.transform, fillGeometry: d.fillGeometry, strokeGeometry: d.strokeGeometry }));
+          for (const ov of derived.concat(sd.symbolOverrides || [])) {
+            const gp = (ov.guidPath?.guids || []).map(gid);
+            if (!gp.length) continue;
+            const k = ig.concat(gp).join("/");
+            const clean = {}; for (const kk in ov) if (ov[kk] !== undefined) clean[kk] = ov[kk];
+            own.set(k, merged(own.get(k) || {}, clean));
+          }
+          const sub = new Map(own);
+          for (const [k, v] of ctx) sub.set(k, merged(sub.get(k) || {}, v));
+          const holder = par && par.isStateGroup ? par : sym;
+          const iprops = new Map();
+          for (const d of holder.componentPropDef || []) if (d.initialValue) iprops.set(gid(d.id), d.initialValue);
+          for (const a of n.componentPropAssignment || []) if (a.value) iprops.set(gid(a.defID), a.value);
+          if (depth < o.depth) for (const c of scene.children(symId)) { const r = build(c, sub, inner, depth + 1, iprops); if (r) kids.push(r); }
+        } else out.component = `<не найден ${symId}>`;
+      } else {
+        // guidPath содержит только цепочку инстансов — обычные фреймы в него не входят
+        for (const c of scene.children(gid(n.guid))) { const r = build(c, ctx, prefix, depth + 1, props); if (r) kids.push(r); }
+      }
+      if (kids.length) out.children = kids;
+      return out;
+    }
+  }
+
+  // ---------------------------------------------------------------- Markdown для LLM
+  function mdLine(o) {
+    const bits = [`**${o.type}**`];
+    if (o.name) bits.push("`" + o.name + "`");
+    if (o.component) bits.push(`⟶ компонент «${o.component}»`);
+    let geo = `${o.w ?? "?"}×${o.h ?? "?"}`;
+    if (o.x !== undefined) geo += ` @(${o.x},${o.y})`;
+    bits.push(geo);
+    const a = [];
+    if (o.layout) {
+      const L = o.layout; let s = `flex-${L.dir} gap ${L.gap}`;
+      if (L.padding) s += " pad " + L.padding.join(" ");
+      if (L.justify) s += ` justify ${L.justify}`;
+      if (L.align) s += ` align ${L.align}`;
+      if (L.wrap) s += " wrap";
+      s += ` (size ${L.sizing.main}/${L.sizing.cross})`;
+      a.push(s);
+    }
+    if (o.child) a.push(Object.keys(o.child).join(" "));
+    if (o.fill) a.push("bg " + o.fill.join(", ") + (o.fillStyle ? ` [${o.fillStyle}]` : ""));
+    if (o.stroke) { const s = o.stroke; a.push(`border ${s.weight} ${s.align} ${s.color.join(", ")}` + (s.sides ? ` sides ${s.sides.join(" ")}` : "") + (s.dash ? " dashed" : "") + (o.strokeStyle ? ` [${o.strokeStyle}]` : "")); }
+    if (o.radius !== undefined) a.push(`radius ${Array.isArray(o.radius) ? o.radius.join(" ") : o.radius}`);
+    if (o.shadow) a.push("shadow " + o.shadow.join("; ") + (o.effectStyle ? ` [${o.effectStyle}]` : ""));
+    if (o.opacity !== undefined) a.push(`opacity ${o.opacity}`);
+    if (o.rotate) a.push(`rotate ${o.rotate}°`);
+    if (o.clip) a.push("overflow hidden");
+    if (o.hidden) a.push("HIDDEN");
+    if (o.textStyle_) {
+      const st = o.textStyle_;
+      let s = `${st.font} ${st.size}` + (st.lineHeight !== undefined ? `/${st.lineHeight}` : "");
+      if (st.color) s += ` ${Array.isArray(st.color) ? st.color.join(",") : st.color}`;
+      for (const k of ["align", "letterSpacing", "case", "decoration"]) if (st[k]) s += ` ${k} ${st[k]}`;
+      if (o.textStyle) s += ` [${o.textStyle}]`;
+      a.push(s);
+    }
+    let line = bits.join(" ");
+    if (a.length) line += " | " + a.join(" | ");
+    return line;
+  }
+  function toMd(o, depth = 0, out = []) {
+    const ind = "  ".repeat(depth);
+    out.push(ind + "- " + mdLine(o));
+    if (o.text !== undefined) {
+      out.push(`${ind}  «${o.text.replace(/\n/g, "⏎")}»`);
+      for (const r of o.textStyle_?.runs || []) {
+        const extra = Object.entries(r).filter(([k]) => !["text", "family", "weight"].includes(k)).map(([k, v]) => `${k} ${v}`);
+        if (extra.length) out.push(`${ind}  ↳ фрагмент «${r.text}»: ${extra.join(", ")}`);
+      }
+    }
+    for (const c of o.children || []) toMd(c, depth + 1, out);
+    return out;
+  }
+  function summarize(tree) {
+    const colors = new Map(), fonts = new Map(), comps = new Map(), images = new Set(); let count = 0;
+    const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+    (function walk(o) {
+      count++;
+      for (const f of o.fill || []) { if (f.startsWith("#")) inc(colors, f); const m = f.match(/^image\(([0-9a-f]+)/); if (m) images.add(m[1]); }
+      for (const c of o.stroke?.color || []) if (c.startsWith("#")) inc(colors, c);
+      const st = o.textStyle_;
+      if (st) { inc(fonts, `${st.font} ${st.size}` + (st.lineHeight !== undefined ? `/${st.lineHeight}` : "")); if (typeof st.color === "string") inc(colors, st.color); }
+      if (o.component) inc(comps, o.component);
+      for (const c of o.children || []) walk(c);
+    })(tree);
+    const sort = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]);
+    return { colors: sort(colors), fonts: sort(fonts), components: sort(comps), images: [...images], count };
+  }
+  function markdown(tree, meta = {}) {
+    const s = summarize(tree);
+    const lines = [
+      `# Макет: ${tree.name} (${tree.id})`, "",
+      `Страница: ${(meta.crumbs || []).join(" / ") || "—"}  `,
+      `Источник: ${meta.source || "—"}`, "",
+      "## Как читать", "",
+      "- Каждая строка — слой: `ТИП` `имя` ширина×высота @(x,y относительно родителя) | свойства.",
+      "- `flex-row/column gap G pad T R B L` — auto-layout (= CSS flexbox). `size resize_to_fit` = hug content, `fixed` = фиксированный размер.",
+      "- `grow` — flex: 1 по главной оси, `stretch` — align-self: stretch, `absolute` — position: absolute.",
+      "- Цвета #RRGGBB или #RRGGBBAA. В [квадратных скобках] — имя стиля/токена из дизайн-системы.",
+      "- `⟶ компонент «…»` — инстанс компонента дизайн-системы, внутри уже раскрыт с учётом переопределений.",
+      "- Текст: шрифт размер/межстрочный, цвет; строка ниже — сам текст.", "",
+      "## Сводка", "",
+      "**Цвета:** " + s.colors.slice(0, 30).map(([c, k]) => `\`${c}\`×${k}`).join(", "), "",
+      "**Типографика:** " + s.fonts.slice(0, 20).map(([c, k]) => `\`${c}\`×${k}`).join(", "), "",
+      "**Компоненты:** " + s.components.slice(0, 40).map(([c, k]) => `«${c}»×${k}`).join(", "), "",
+    ];
+    if (s.images.length) lines.push("**Картинки:** " + s.images.map((h) => `\`${h}\``).join(", "), "");
+    lines.push("## Дерево слоёв", "", ...toMd(tree));
+    return lines.join("\n") + "\n";
+  }
+
+  return { loadHar, buildFrame, markdown, toMd, summarize, gid, Scene, parseSchema, decodeMessage };
+})();
+
+</script>
+<script type="text/plain" id="worker-src">
+// Web Worker: держит раскодированную сцену и собирает фреймы по запросу.
+let state = null;
+self.onmessage = async (e) => {
+  const m = e.data;
+  try {
+    if (m.type === "load") {
+      state = null;
+      const r = await CORE.loadHar(new Uint8Array(m.buffer), (stage, detail) => self.postMessage({ type: "progress", stage, detail }));
+      state = r;
+      const pages = r.scene.pages();
+      let def = null;
+      try {
+        const q = r.pageUrl ? new URL(r.pageUrl).searchParams : null;
+        def = q && (q.get("item-id") || q.get("node-id"));
+        if (def) def = def.replace("-", ":");
+      } catch (_) { def = null; }
+      if (!def || !r.scene.nodes.has(def)) def = pages.find((p) => p.frames.length)?.frames[0]?.id || null;
+      self.postMessage({ type: "ready", pages, meta: r.meta, pageUrl: r.pageUrl, innerName: r.fileName, defaultId: def });
+    } else if (m.type === "build") {
+      if (!state) throw new Error("Документ ещё не загружен");
+      const { tree, usedImages } = CORE.buildFrame(state.scene, m.id, m.opts);
+      const crumbs = state.scene.crumbs(m.id);
+      const md = CORE.markdown(tree, { crumbs, source: state.pageUrl });
+      const images = {};
+      for (const h of usedImages) if (state.images[h]) images[h] = state.images[h];
+      self.postMessage({ type: "frame", req: m.req, id: m.id, tree, md, images, crumbs });
+    }
+  } catch (err) {
+    self.postMessage({ type: "error", req: m.req, during: m.type, message: String((err && err.message) || err) });
+  }
+};
+
+</script>
+<script>
+// Пример фрейма для первого экрана (вымышленные данные), в том же формате, что выдаёт CORE.buildFrame.
+const DEMO = (() => {
+  let seq = 0;
+  const id = () => `demo:${++seq}`;
+  const text = (name, s, x, y, w, h, family, style, size, lh, color, extra = {}) => ({
+    type: "TEXT", name, id: id(), x, y, w, h, text: s,
+    textStyle_: Object.assign({ font: `${family} ${style}`, family, weight: { Regular: 400, Medium: 500, Semibold: 600 }[style], size, lineHeight: lh, color, autoResize: "width_and_height" }, extra.st || {}),
+    ...(extra.o || {}),
+  });
+  const T = "SB Sans Text", D = "SB Sans Display";
+  const ink = "#13211B", soft = "#5D6E66", faint = "#8FA39A", line = "#DDE6E1";
+
+  const chip = (label, x, w, selected) => ({
+    type: "INSTANCE", name: "Chip", id: id(), component: `Chip 36 / ${selected ? "Selected" : "Default"}`,
+    x, y: 0, w, h: 36, fill: [selected ? ink : "#FFFFFF"], radius: 18,
+    ...(selected ? {} : { stroke: { color: ["#D3DDD8"], weight: 1, align: "inside" } }),
+    layout: { dir: "row", gap: 6, padding: [9, 16, 9, 16], align: "center", sizing: { main: "resize_to_fit", cross: "fixed" } },
+    children: [text("Label", label, 16, 9, w - 32, 18, T, "Medium", 14, 18, selected ? "#FFFFFF" : ink)],
+  });
+  const badge = (label, bg, fg, w) => ({
+    type: "INSTANCE", name: "Status", id: id(), component: `Badge 24 / ${label}`, x: 680, y: 30, w, h: 24, fill: [bg], radius: 12,
+    layout: { dir: "row", gap: 0, padding: [3, 10, 3, 10], align: "center", sizing: { main: "resize_to_fit", cross: "resize_to_fit" } },
+    children: [text("Label", label, 10, 3, w - 20, 18, T, "Medium", 12, 18, fg)],
+  });
+  const STATUS = { wait: ["На согласовании", "#FCEBC4", "#7A5000", 136], ok: ["Выдан", "#D9F2DF", "#1D7A37", 64], no: ["Отклонён", "#FADBD5", "#A33622", 84] };
+  const rows = [
+    ["Анна Смирнова", "Аналитик · Москва", "Jira", "Просмотр проектов", "wait", "до 14.11.2026", "#3F8E6B"],
+    ["Олег Ким", "Разработчик · Казань", "GitLab", "Maintainer", "ok", "до 30.11.2026", "#5866C4"],
+    ["Мария Гусева", "Дизайнер · Москва", "Pixso", "Редактор файлов", "ok", "бессрочно", "#C2577A"],
+    ["Тимур Алиев", "DevOps · Новосибирск", "Grafana", "Администратор", "no", "—", "#B07A1F"],
+    ["Ксения Орлова", "Тестировщик · Самара", "Confluence", "Чтение", "wait", "до 21.11.2026", "#2F7FA3"],
+  ];
+  const tableRows = rows.map(([name, sub, sys, role, st, date, av], i) => {
+    const initials = name.split(" ").map((p) => p[0]).join("");
+    const [label, bg, fg, bw] = STATUS[st];
+    return {
+      type: "FRAME", name: "Row", id: id(), x: 0, y: 44 + i * 84, w: 976, h: 84,
+      stroke: { color: [line], weight: 1, align: "inside", sides: [1, 0, 0, 0] },
+      children: [
+        { type: "ELLIPSE", name: "Avatar", id: id(), x: 20, y: 22, w: 40, h: 40, fill: [av] },
+        text("Initials", initials, 20, 33, 40, 18, T, "Semibold", 14, 18, "#FFFFFF", { st: { align: "center", autoResize: "none" } }),
+        text("Name", name, 72, 22, 190, 20, T, "Semibold", 15, 20, ink),
+        text("Caption", sub, 72, 44, 190, 16, T, "Regular", 13, 16, soft),
+        text("System", sys, 280, 32, 150, 20, T, "Regular", 14, 20, ink),
+        text("Role", role, 460, 32, 200, 20, T, "Regular", 14, 20, ink),
+        badge(label, bg, fg, bw),
+        text("Due", date, 856, 32, 100, 20, T, "Regular", 14, 20, soft),
+      ],
+    };
+  });
+  const headers = [["Сотрудник", 20], ["Система", 280], ["Роль", 460], ["Статус", 680], ["Срок", 856]].map(([s, x]) =>
+    text("Header", s.toUpperCase(), x, 14, 120, 16, T, "Medium", 11, 16, soft, { st: { letterSpacing: "6%", case: "upper" } }));
+
+  const tree = {
+    type: "FRAME", name: "Заявки на доступ", id: "demo:root", x: 0, y: 0, w: 1040, h: 660,
+    fill: ["#F3F6F4"], fillStyle: "Surfaces/Solid/surfacePrimary",
+    layout: { dir: "column", gap: 24, padding: [32, 32, 32, 32], sizing: { main: "fixed", cross: "fixed" } },
+    children: [
+      {
+        type: "FRAME", name: "Header", id: id(), x: 32, y: 32, w: 976, h: 44,
+        layout: { dir: "row", gap: 16, justify: "space_between", align: "center", sizing: { main: "fixed", cross: "resize_to_fit" } },
+        children: [
+          {
+            type: "FRAME", name: "Title", id: id(), x: 0, y: 0, w: 400, h: 44,
+            layout: { dir: "column", gap: 2, sizing: { main: "resize_to_fit", cross: "fixed" } },
+            children: [
+              text("H1", "Заявки на доступ", 0, 0, 300, 28, D, "Semibold", 22, 28, ink, { o: { textStyle: "Header/H3" } }),
+              text("Caption", "Отдел платформы · 24 заявки за ноябрь", 0, 28, 320, 16, T, "Regular", 13, 16, soft),
+            ],
+          },
+          {
+            type: "INSTANCE", name: "Button", id: id(), component: "Button 44 / Accent / IconLeft", x: 804, y: 0, w: 172, h: 44,
+            fill: ["#21A038"], fillStyle: "Accent/accentPrimary", radius: 12,
+            layout: { dir: "row", gap: 8, padding: [10, 18, 10, 14], align: "center", sizing: { main: "resize_to_fit", cross: "fixed" } },
+            children: [
+              { type: "INSTANCE", name: "Icon", id: id(), component: "24 / Plus", x: 14, y: 10, w: 24, h: 24, children: [
+                { type: "VECTOR", name: "icon", id: id(), x: 5, y: 5, w: 14, h: 14, fill: ["#FFFFFF"], paths: [{ d: "M6 0h2v6h6v2H8v6H6V8H0V6h6z", rule: "nonzero" }] },
+              ] },
+              text("Label", "Новая заявка", 46, 13, 108, 18, T, "Medium", 14, 18, "#FFFFFF"),
+            ],
+          },
+        ],
+      },
+      {
+        type: "FRAME", name: "Filters", id: id(), x: 32, y: 100, w: 976, h: 36,
+        layout: { dir: "row", gap: 8, sizing: { main: "fixed", cross: "resize_to_fit" } },
+        children: [
+          chip("Все · 24", 0, 92, true),
+          chip("На согласовании · 7", 100, 182, false),
+          chip("Выданы · 15", 290, 118, false),
+          chip("Отклонены · 2", 416, 132, false),
+          {
+            type: "INSTANCE", name: "Search", id: id(), component: "Input 36 / Search", x: 736, y: 0, w: 240, h: 36, child: { absolute: true },
+            fill: ["#FFFFFF"], radius: 10, stroke: { color: ["#D3DDD8"], weight: 1, align: "inside" },
+            layout: { dir: "row", gap: 8, padding: [6, 12, 6, 10], align: "center", sizing: { main: "fixed", cross: "fixed" } },
+            children: [
+              { type: "VECTOR", name: "search", id: id(), x: 13, y: 11, w: 15, h: 15, fill: [faint], paths: [{ d: "M6.5 0a6.5 6.5 0 0 1 5.17 10.44l3.2 3.2-1.23 1.23-3.2-3.2A6.5 6.5 0 1 1 6.5 0zm0 1.75a4.75 4.75 0 1 0 0 9.5 4.75 4.75 0 0 0 0-9.5z", rule: "nonzero" }] },
+              text("Placeholder", "Сотрудник или система", 36, 9, 180, 18, T, "Regular", 14, 18, faint),
+            ],
+          },
+        ],
+      },
+      {
+        type: "FRAME", name: "Table", id: id(), x: 32, y: 160, w: 976, h: 468, clip: true,
+        fill: ["#FFFFFF"], fillStyle: "Surfaces/Solid/surfaceCard", radius: 16,
+        stroke: { color: [line], weight: 1, align: "inside" }, shadow: ["0 1 2 0 #13211B14"],
+        layout: { dir: "column", gap: 0, sizing: { main: "resize_to_fit", cross: "fixed" } },
+        children: [{ type: "FRAME", name: "Head", id: id(), x: 0, y: 0, w: 976, h: 44, fill: ["#F7FAF8"], children: headers }, ...tableRows],
+      },
+    ],
+  };
+  return {
+    tree,
+    pages: [{ id: "demo", name: "Пример", frames: [{ id: "demo:root", name: "Заявки на доступ", type: "FRAME", w: 1040, h: 660, depth: 0 }] }],
+    crumbs: ["Пример"],
+  };
+})();
+
+</script>
+<script>
+// Интерфейс «Раскроя». Тяжёлая работа (HAR, zstd, Kiwi) — в Web Worker из встроенных исходников.
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const h = (tag, attrs = {}, ...kids) => {
+    const el = document.createElement(tag);
+    for (const k in attrs) {
+      const v = attrs[k];
+      if (v === undefined || v === null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "style") el.style.cssText = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? "" : v);
+    }
+    for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
+    return el;
+  };
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("raskroy:" + k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+    set(k, v) { try { localStorage.setItem("raskroy:" + k, JSON.stringify(v)); } catch (_) {} },
+  };
+  const fmt = (n) => (n === undefined ? "?" : String(n).replace(".", ","));
+  const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? b : c; };
+
+  // ---------------------------------------------------------------- состояние
+  const S = {
+    demo: true, pages: DEMO.pages, currentId: "demo:root", tree: DEMO.tree, crumbs: DEMO.crumbs, images: {},
+    md: CORE.markdown(DEMO.tree, { crumbs: DEMO.crumbs, source: "пример" }),
+    flat: [], selected: null, zoom: 1, fit: true, file: null, meta: null, req: 0, filter: "",
+    tab: store.get("tab", "md"), hidden: store.get("hidden", false),
+  };
+
+  // ---------------------------------------------------------------- worker
+  let worker = null;
+  function getWorker() {
+    if (worker) return worker;
+    const src = ["zstd-src", "core-src", "worker-src"].map((id) => document.getElementById(id).textContent).join("\n;\n");
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    worker.onmessage = onWorker;
+    worker.onerror = (e) => showError(e.message || "Ошибка в фоновом обработчике");
+    return worker;
+  }
+  function onWorker(e) {
+    const m = e.data;
+    if (m.type === "progress") stepProgress(m.stage, m.detail);
+    else if (m.type === "ready") {
+      stepProgress("done");
+      S.demo = false; S.pages = m.pages; S.meta = m.meta; S.pageUrl = m.pageUrl; S.innerName = m.innerName;
+      renderHeader(); renderRail();
+      if (m.defaultId) openFrame(m.defaultId); else { hideProgress(); toast("В файле нет фреймов"); }
+    } else if (m.type === "frame") {
+      if (m.req !== S.req) return;
+      hideProgress();
+      S.currentId = m.id; S.tree = m.tree; S.md = m.md; S.images = m.images; S.crumbs = m.crumbs; S.selected = null;
+      S.fit = true;
+      renderAll();
+    } else if (m.type === "error") {
+      if (m.during === "build" && m.req !== S.req) return;
+      showError(m.message);
+    }
+  }
+
+  // ---------------------------------------------------------------- загрузка файла
+  async function takeFile(file) {
+    if (!file) return;
+    S.file = { name: file.name, size: file.size };
+    showProgress(file);
+    try {
+      const buf = await file.arrayBuffer();
+      getWorker().postMessage({ type: "load", buffer: buf }, [buf]);
+    } catch (err) { showError("Не удалось прочитать файл: " + err.message); }
+  }
+  function openFrame(id) {
+    if (S.demo) return;
+    S.req++;
+    if (!$(".progress")) { $(".stage").classList.add("busy"); }
+    getWorker().postMessage({ type: "build", req: S.req, id, opts: { hidden: S.hidden } });
+    S.currentId = id; renderRail();
+  }
+
+  // ---------------------------------------------------------------- прогресс
+  const STAGES = [["zip", "Архив"], ["har", "HAR"], ["schema", "Схема"], ["doc", "Документ"], ["nodes", "Слои"]];
+  function showProgress(file) {
+    hideProgress();
+    const ul = h("ul", {}, STAGES.map(([k, label]) => h("li", { "data-k": k, class: k === "zip" && !/\.zip$/i.test(file.name) ? "skip" : "" }, h("span", { class: "dot" }), h("span", {}, label), h("span", { class: "d mono" }, ""))));
+    ul.querySelectorAll(".skip").forEach((li) => li.remove());
+    ul.firstElementChild.classList.add("now");
+    const card = h("div", { class: "card", role: "status", "aria-live": "polite" },
+      h("div", { class: "blade" }), h("h4", {}, "Раскраиваю файл"),
+      h("div", { class: "file mono" }, `${file.name} · ${(file.size / 1048576).toFixed(1)} МБ`), ul);
+    $(".stage").append(h("div", { class: "progress" }, card));
+    $("#intro") && ($("#intro").hidden = true);
+  }
+  function stepProgress(stage, detail) {
+    const box = $(".progress"); if (!box) return;
+    const items = [...box.querySelectorAll("li")];
+    if (stage === "done") { items.forEach((li) => { li.classList.remove("now"); li.classList.add("done"); }); return; }
+    const i = items.findIndex((li) => li.dataset.k === stage);
+    if (i < 0) return;
+    items.forEach((li, j) => { li.classList.toggle("done", j <= i); li.classList.toggle("now", j === i + 1); });
+    items[i].querySelector(".d").textContent = detail || "";
+  }
+  function hideProgress() { const p = $(".progress"); if (p) p.remove(); $(".stage").classList.remove("busy"); }
+  function showError(msg) {
+    $(".stage").classList.remove("busy");
+    let box = $(".progress");
+    if (!box) { showProgress(S.file || { name: "файл", size: 0 }); box = $(".progress"); }
+    const card = box.querySelector(".card");
+    card.querySelector(".blade")?.remove();
+    card.querySelector("h4").textContent = "Не получилось раскроить";
+    card.querySelectorAll(".now").forEach((li) => li.classList.remove("now"));
+    card.append(h("div", { class: "err" }, msg), h("button", { class: "btn", onclick: () => { hideProgress(); if (S.demo) $("#intro").hidden = false; } }, "Закрыть"));
+  }
+
+  // ---------------------------------------------------------------- шапка
+  function renderHeader() {
+    const box = $("#filechip"); box.replaceChildren();
+    if (S.demo) {
+      box.append(h("button", { class: "btn primary", onclick: () => $("#file").click() }, icon("upload"), "Открыть HAR"));
+      return;
+    }
+    const m = S.meta || {};
+    box.append(
+      h("div", { class: "meta mono" }, h("b", {}, S.file?.name || "файл"), h("br"),
+        `${(m.nodes || 0).toLocaleString("ru-RU")} слоёв · Kiwi ${m.schema || "?"}${m.created ? " · Pixso " + m.created : ""}`),
+      h("button", { class: "btn", onclick: () => $("#file").click() }, icon("upload"), "Другой HAR"),
+    );
+  }
+
+  // ---------------------------------------------------------------- список фреймов
+  function renderRail() {
+    const list = $("#frames"), sel = $("#frame-select");
+    list.replaceChildren(); sel.replaceChildren();
+    const q = S.filter.trim().toLowerCase();
+    let total = 0;
+    for (const p of S.pages) {
+      const frames = p.frames.filter((f) => !q || f.name.toLowerCase().includes(q) || f.id.includes(q));
+      if (!frames.length) continue;
+      list.append(h("div", { class: "page label" }, h("span", {}, p.name), h("span", { class: "tnum" }, frames.length)));
+      const og = h("optgroup", { label: p.name });
+      for (const f of frames) {
+        total++;
+        list.append(h("button", {
+          class: f.depth ? "sub" : "", "aria-current": f.id === S.currentId ? "true" : "false", title: `${f.name} · ${f.id}`,
+          onclick: () => { if (f.id !== S.currentId) openFrame(f.id); },
+        }, h("i", { class: "sq" }), h("span", { class: "nm" }, f.name), h("span", { class: "dim mono tnum" }, `${fmt(f.w)}×${fmt(f.h)}`)));
+        og.append(h("option", { value: f.id, selected: f.id === S.currentId }, `${f.depth ? "  " : ""}${f.name} — ${fmt(f.w)}×${fmt(f.h)}`));
+      }
+      sel.append(og);
+    }
+    if (!total) list.append(h("div", { class: "empty" }, q ? "Ничего не нашлось. Попробуйте часть имени фрейма или его id." : "На страницах нет фреймов."));
+    $("#frames-count").textContent = S.pages.reduce((a, p) => a + p.frames.length, 0);
+  }
+
+  // ---------------------------------------------------------------- превью
+  const CSS_GRAD = (f) => {
+    const m = f.match(/^(\w+)-gradient\((.*)\)$/); if (!m) return null;
+    const stops = m[2];
+    if (m[1] === "linear") return `linear-gradient(180deg, ${stops})`;
+    if (m[1] === "angular") return `conic-gradient(${stops})`;
+    return `radial-gradient(closest-side, ${stops})`;
+  };
+  const firstColor = (c) => { if (!c) return null; const s = Array.isArray(c) ? c[0] : c; if (s.startsWith("#")) return s; const m = s.match(/#[0-9A-F]{6,8}/i); return m ? m[0] : null; };
+  const px = (v) => `${v}px`;
+
+  function renderBoard() {
+    const t = S.tree, board = $("#board"), sheet = $("#sheet");
+    board.replaceChildren(); S.flat = [];
+    board.style.width = px(t.w); board.style.height = px(t.h);
+    const root = node(t, true, -1);
+    board.append(root);
+    applyZoom();
+  }
+  function node(o, isRoot, parent) {
+    const i = S.flat.length;
+    const el = document.createElement("div");
+    el.className = "n" + (o.type === "TEXT" ? " txt" : "");
+    el.dataset.i = i;
+    S.flat.push({ o, el, parent });
+    const st = el.style;
+    if (!isRoot && o.m) { st.left = "0"; st.top = "0"; st.transform = `matrix(${o.m.join(",")})`; }
+    else { st.left = px(isRoot ? 0 : o.x || 0); st.top = px(isRoot ? 0 : o.y || 0); }
+    st.width = px(Math.max(o.w || 0, 0)); st.height = px(Math.max(o.h || 0, 0));
+    const vec = !!(o.paths || o.strokePaths);
+    if (o.fill && o.type !== "TEXT" && !vec) {
+      const layers = o.fill.slice().reverse().map((f) => {
+        if (f.startsWith("#")) return `linear-gradient(${f},${f})`;
+        if (f.includes("-gradient(")) return CSS_GRAD(f);
+        const m = f.match(/^image\(([0-9a-f?]+)/);
+        if (m) return S.images[m[1]] ? `url("${S.images[m[1]]}") center/cover no-repeat` : "repeating-linear-gradient(45deg, #9aa9a2 0 6px, #c5d0cb 6px 12px)";
+        return null;
+      }).filter(Boolean);
+      if (layers.length) st.background = layers.reverse().join(",");
+    }
+    if (o.type === "ELLIPSE") st.borderRadius = "50%";
+    else if (o.radius !== undefined) st.borderRadius = Array.isArray(o.radius) ? o.radius.map(px).join(" ") : px(o.radius);
+    const shadows = [], filters = [];
+    if (o.stroke && !vec) {
+      const s = o.stroke, c = firstColor(s.color) || "#000";
+      if (s.sides) { st.boxSizing = "border-box"; st.borderStyle = s.dash ? "dashed" : "solid"; st.borderColor = c; st.borderWidth = s.sides.map(px).join(" "); }
+      else if (s.dash) { st.outline = `${s.weight}px dashed ${c}`; st.outlineOffset = s.align === "outside" ? "0" : `-${s.weight}px`; }
+      else if (s.align === "outside") shadows.push(`0 0 0 ${s.weight}px ${c}`);
+      else if (s.align === "center") shadows.push(`inset 0 0 0 ${s.weight / 2}px ${c}`, `0 0 0 ${s.weight / 2}px ${c}`);
+      else shadows.push(`inset 0 0 0 ${s.weight}px ${c}`);
+    }
+    for (const sh of o.shadow || []) {
+      const b = sh.match(/^(\w+)_blur\(([\d.]+)\)$/);
+      if (b) { if (b[1] === "background") st.backdropFilter = `blur(${b[2] / 2}px)`; else filters.push(`blur(${b[2] / 2}px)`); continue; }
+      const p = sh.split(" "); const inset = p[0] === "inset"; if (inset) p.shift();
+      const [x, y, r, s, c] = p;
+      if (o.type === "TEXT" || vec) filters.push(`drop-shadow(${x}px ${y}px ${r / 2}px ${c})`);
+      else shadows.push(`${inset ? "inset " : ""}${x}px ${y}px ${r}px ${s}px ${c}`);
+    }
+    if (shadows.length) st.boxShadow = shadows.join(",");
+    if (filters.length) st.filter = filters.join(" ");
+    if (o.opacity !== undefined) st.opacity = o.opacity;
+    if (o.clip) st.overflow = "hidden";
+
+    if (vec) {
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("width", Math.max(o.w || 0, 1)); svg.setAttribute("height", Math.max(o.h || 0, 1));
+      const fillC = firstColor(o.fill?.find((f) => f.startsWith("#") || f.includes("gradient")));
+      for (const p of o.paths || []) { if (!fillC) break; const e = document.createElementNS(ns, "path"); e.setAttribute("d", p.d); e.setAttribute("fill", fillC); e.setAttribute("fill-rule", p.rule); svg.append(e); }
+      const strokeC = firstColor(o.stroke?.color);
+      for (const p of o.strokePaths || []) { if (!strokeC) break; const e = document.createElementNS(ns, "path"); e.setAttribute("d", p.d); e.setAttribute("fill", strokeC); e.setAttribute("fill-rule", p.rule); svg.append(e); }
+      el.append(svg);
+    }
+    if (o.type === "TEXT") {
+      const ts = o.textStyle_ || {};
+      st.fontFamily = `"${ts.family || ""}", var(--font-ui)`;
+      st.fontWeight = ts.weight || 400; if (ts.italic) st.fontStyle = "italic";
+      st.fontSize = px(ts.size || 14);
+      if (ts.lineHeight !== undefined) st.lineHeight = typeof ts.lineHeight === "number" ? px(ts.lineHeight) : ts.lineHeight;
+      if (ts.letterSpacing) st.letterSpacing = ts.letterSpacing.endsWith("%") ? `${parseFloat(ts.letterSpacing) / 100}em` : ts.letterSpacing;
+      st.color = firstColor(ts.color) || "#000";
+      if (ts.align) st.textAlign = ts.align === "justified" ? "justify" : ts.align;
+      if (ts.valign) st.justifyContent = ts.valign === "center" ? "center" : "flex-end";
+      if (ts.case === "upper") st.textTransform = "uppercase"; else if (ts.case === "lower") st.textTransform = "lowercase"; else if (ts.case === "title") st.textTransform = "capitalize";
+      if (ts.decoration) st.textDecoration = ts.decoration === "strikethrough" ? "line-through" : "underline";
+      st.whiteSpace = ts.autoResize === "width_and_height" ? "pre" : "pre-wrap";
+      const span = document.createElement("span");
+      if (ts.runs) for (const r of ts.runs) {
+        const s = document.createElement("span"); s.textContent = r.text;
+        if (r.color) s.style.color = firstColor(r.color); if (r.size) s.style.fontSize = px(r.size);
+        if (r.weight) s.style.fontWeight = r.weight; if (r.family) s.style.fontFamily = `"${r.family}", var(--font-ui)`;
+        if (r.decoration) s.style.textDecoration = r.decoration === "strikethrough" ? "line-through" : "underline";
+        span.append(s);
+      } else span.textContent = o.text;
+      el.append(span);
+    }
+    for (const c of o.children || []) el.append(node(c, false, i));
+    return el;
+  }
+
+  function fitZoom() {
+    const v = $("#view"); const pad = innerWidth <= 820 ? 40 : 96;
+    const z = Math.min((v.clientWidth - pad) / S.tree.w, 2);
+    return Math.max(0.05, Math.floor(z * 100) / 100);
+  }
+  function applyZoom() {
+    if (S.fit) S.zoom = fitZoom();
+    const z = S.zoom, t = S.tree;
+    $("#board").style.transform = `scale(${z})`;
+    $("#sheet").style.width = px(t.w * z); $("#sheet").style.height = px(t.h * z);
+    $("#zoom-val").textContent = `${Math.round(z * 100)}%`;
+    document.querySelectorAll("#zoom button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.z === "fit" ? S.fit : !S.fit && +b.dataset.z === z)));
+    placeSel(); drawRulers();
+  }
+
+  // наведение и выбор
+  function rectIn(el) {
+    const sr = $("#sheet").getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height };
+  }
+  function place(box, i) {
+    if (i === null || i === undefined || !S.flat[i]) { box.hidden = true; return; }
+    const { o, el } = S.flat[i]; const r = rectIn(el);
+    box.hidden = false;
+    Object.assign(box.style, { left: px(r.x), top: px(r.y), width: px(Math.max(r.w, 1)), height: px(Math.max(r.h, 1)) });
+    box.querySelector(".tagx").textContent = `${o.name || (o.text ? "«" + (o.text.length > 26 ? o.text.slice(0, 25) + "…" : o.text) + "»" : o.type)} · ${fmt(o.w)}×${fmt(o.h)}`;
+  }
+  function placeSel() { place($("#sel"), S.selected); }
+  function select(i, from) {
+    S.selected = i; placeSel(); drawRulers(); renderInspector();
+    document.querySelectorAll(".tree .row[aria-selected='true']").forEach((r) => r.setAttribute("aria-selected", "false"));
+    if (i === null) return;
+    // раскрыть предков в дереве
+    let p = S.flat[i].parent; const chain = [];
+    while (p >= 0) { chain.push(p); p = S.flat[p].parent; }
+    for (const a of chain.reverse()) { const row = $(`.tree .row[data-i="${a}"]`); if (row) expand(row, true); }
+    const row = $(`.tree .row[data-i="${i}"]`);
+    if (row) { row.setAttribute("aria-selected", "true"); if (from !== "tree") row.scrollIntoView({ block: "nearest" }); }
+  }
+
+  // линейки в пикселях фрейма
+  function drawRulers() {
+    const rx = $("#rx"), ry = $("#ry"), v = $("#view");
+    if (!rx.offsetWidth) return;
+    const dpr = devicePixelRatio || 1, cs = getComputedStyle(document.documentElement);
+    const ink = cs.getPropertyValue("--ink-faint").trim(), acc = cs.getPropertyValue("--accent-soft").trim(), accLine = cs.getPropertyValue("--accent").trim();
+    const vr = v.getBoundingClientRect(), sr = $("#sheet").getBoundingClientRect(), z = S.zoom;
+    const steps = [5, 10, 20, 50, 100, 200, 500, 1000, 2000];
+    const major = steps.find((s) => s * z >= 64) || 5000, minor = major / (major % 5 === 0 ? 5 : 2);
+    const sel = S.selected !== null && S.flat[S.selected] ? rectIn(S.flat[S.selected].el) : null;
+    for (const [cv, horiz] of [[rx, true], [ry, false]]) {
+      const W = cv.offsetWidth, H = cv.offsetHeight;
+      cv.width = W * dpr; cv.height = H * dpr;
+      const c = cv.getContext("2d"); c.scale(dpr, dpr); c.clearRect(0, 0, W, H);
+      const origin = horiz ? sr.left - vr.left : sr.top - vr.top, len = horiz ? W : H;
+      if (sel) { c.fillStyle = acc; const a = origin + (horiz ? sel.x : sel.y), b = horiz ? sel.w : sel.h; horiz ? c.fillRect(a, 0, b, H) : c.fillRect(0, a, W, b); c.fillStyle = accLine; horiz ? (c.fillRect(a, 0, 1, H), c.fillRect(a + b - 1, 0, 1, H)) : (c.fillRect(0, a, W, 1), c.fillRect(0, a + b - 1, W, 1)); }
+      c.fillStyle = ink; c.strokeStyle = ink; c.font = `500 9px ${cs.getPropertyValue("--font-mono")}`; c.lineWidth = 1;
+      const from = Math.floor(-origin / z / minor) * minor, to = (len - origin) / z;
+      for (let p = from; p <= to; p += minor) {
+        const s = Math.round(origin + p * z) + 0.5; const isMajor = Math.abs(p % major) < 1e-6;
+        const tl = isMajor ? 9 : 4;
+        c.beginPath();
+        if (horiz) { c.moveTo(s, H); c.lineTo(s, H - tl); } else { c.moveTo(W, s); c.lineTo(W - tl, s); }
+        c.stroke();
+        if (isMajor) {
+          if (horiz) c.fillText(String(Math.round(p)), s + 3, 10);
+          else { c.save(); c.translate(10, s - 3); c.rotate(-Math.PI / 2); c.fillText(String(Math.round(p)), 0, 0); c.restore(); }
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- панель
+  function setTab(t) {
+    S.tab = t; store.set("tab", t);
+    document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+    document.querySelectorAll(".tabpane").forEach((p) => (p.hidden = p.dataset.tab !== t));
+    if (t === "layers" && S.selected !== null) select(S.selected);
+  }
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  function renderMd() {
+    const html = esc(S.md).split("\n").map((line) => {
+      if (line.startsWith("#")) return `<span class="h">${line}</span>`;
+      return line
+        .replace(/\*\*([A-Z_]+)\*\*/g, '<span class="t">$1</span>')
+        .replace(/⟶ компонент «([^»]*)»/g, '<span class="cmp">⟶ «$1»</span>')
+        .replace(/^(\s*)«(.*)»$/g, '$1<span class="tx">«$2»</span>')
+        .replace(/`([^`]+)`/g, '<span class="nm">$1</span>')
+        .replace(/#[0-9A-F]{6}(?:[0-9A-F]{2})?\b/g, (c) => `<i class="sw" style="background:${c}"></i>${c}`);
+    }).join("\n");
+    $("#md").innerHTML = html;
+    const kb = new Blob([S.md]).size / 1024;
+    $("#md-meta").textContent = `${kb.toFixed(1).replace(".", ",")} КБ · ≈${Math.round(S.md.length / 3.2).toLocaleString("ru-RU")} токенов`;
+    $("#tab-md-n").textContent = `${S.md.split("\n").length}`;
+  }
+  function renderTree() {
+    const box = $("#tree"); box.replaceChildren();
+    const TY = { FRAME: "FR", INSTANCE: "IN", TEXT: "TX", VECTOR: "VC", RECTANGLE: "RE", ELLIPSE: "EL", GROUP: "GR", LINE: "LN", BOOLEAN_OPERATION: "BO", SYMBOL: "SY", SECTION: "SE", STAR: "ST", REGULAR_POLYGON: "PO" };
+    const build = (i, depth) => {
+      const { o } = S.flat[i];
+      const kidsIdx = []; for (let j = i + 1; j < S.flat.length; j++) if (S.flat[j].parent === i) kidsIdx.push(j);
+      const open = depth < 2;
+      const tw = kidsIdx.length ? h("button", { class: "tw", "aria-expanded": String(open), "aria-label": "Развернуть", onclick: (e) => { e.stopPropagation(); expand(e.currentTarget.closest(".row")); } }, icon("caret")) : h("span");
+      const label = o.type === "TEXT" ? h("span", { class: "nm" }, h("q", {}, (o.text || "").slice(0, 60))) : h("span", { class: "nm" }, o.name || o.type, o.component ? h("span", { class: "dm" }, "  " + o.component) : null);
+      const row = h("div", { class: "row", role: "treeitem", tabindex: "0", "data-i": i, "aria-selected": "false", style: `padding-left:${depth * 12}px`,
+        onclick: () => select(i, "tree"), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(i, "tree"); } } },
+        tw, h("span", { class: "ty" + (o.type === "INSTANCE" ? " in" : o.type === "TEXT" ? " tx" : "") }, TY[o.type] || o.type.slice(0, 2)), label,
+        h("span", { class: "dm mono tnum" }, `${fmt(o.w)}×${fmt(o.h)}`));
+      const wrap = h("div", { role: "group" }, row);
+      if (kidsIdx.length) {
+        const kids = h("div", { class: "kids", hidden: !open });
+        if (open) kidsIdx.forEach((j) => kids.append(build(j, depth + 1)));
+        else kids.dataset.lazy = JSON.stringify(kidsIdx), kids.dataset.depth = depth + 1;
+        wrap.append(kids);
+      }
+      return wrap;
+    };
+    box._build = build;
+    if (S.flat.length) box.append(build(0, 0));
+    $("#tab-layers-n").textContent = S.flat.length;
+  }
+  function expand(row, force) {
+    const btn = row.querySelector(".tw"); if (!btn || !btn.tagName || btn.tagName !== "BUTTON") return;
+    const kids = row.parentElement.querySelector(":scope > .kids"); if (!kids) return;
+    const open = force === true ? true : btn.getAttribute("aria-expanded") !== "true";
+    if (open && kids.dataset.lazy) { const d = +kids.dataset.depth; JSON.parse(kids.dataset.lazy).forEach((j) => kids.append($("#tree")._build(j, d))); delete kids.dataset.lazy; }
+    btn.setAttribute("aria-expanded", String(open)); kids.hidden = !open;
+  }
+  function renderInspector() {
+    const box = $("#inspector"); box.replaceChildren();
+    if (S.selected === null) { box.append(h("p", { class: "empty" }, "Выберите слой на превью или в дереве — здесь появятся его размеры, отступы, цвета и шрифт, а ещё кнопка, чтобы скопировать только этот блок.")); return; }
+    const { o } = S.flat[S.selected];
+    const rows = [];
+    const add = (k, ...v) => rows.push(h("dt", {}, k), h("dd", {}, ...v));
+    add("Размер", h("span", { class: "tnum" }, `${fmt(o.w)} × ${fmt(o.h)}`), o.x !== undefined ? h("span", { class: "mono", style: "color:var(--ink-faint)" }, `  x ${fmt(o.x)} · y ${fmt(o.y)}`) : null);
+    if (o.component) add("Компонент", o.component);
+    if (o.layout) { const L = o.layout; add("Auto-layout", `${L.dir === "row" ? "строка →" : "колонка ↓"} · gap ${L.gap}` + (L.padding ? ` · padding ${L.padding.join(" ")}` : "") + (L.justify ? ` · ${L.justify}` : "") + (L.align ? ` · align ${L.align}` : "")); }
+    if (o.child) add("В родителе", Object.keys(o.child).map((k) => ({ grow: "растягивается", stretch: "на всю ширину", absolute: "абсолютно" })[k]).join(", "));
+    const chips = (list) => list.map((c) => h("span", { class: "chip" }, h("i", { style: `background:${c.startsWith("#") ? c : c.includes("gradient") ? CSS_GRAD(c) : "transparent"}` }), c.length > 40 ? c.slice(0, 40) + "…" : c));
+    if (o.fill) add("Заливка", ...chips(o.fill), o.fillStyle ? h("div", { class: "mono" }, o.fillStyle) : null);
+    if (o.stroke) add("Обводка", `${o.stroke.weight}px ${o.stroke.align} `, ...chips(o.stroke.color));
+    if (o.radius !== undefined) add("Скругление", Array.isArray(o.radius) ? o.radius.join(" ") : String(o.radius));
+    if (o.shadow) add("Эффекты", o.shadow.join("; "));
+    if (o.opacity !== undefined) add("Прозрачность", String(o.opacity));
+    if (o.textStyle_) {
+      const ts = o.textStyle_;
+      add("Текст", o.text);
+      add("Шрифт", `${ts.font} · ${ts.size}${ts.lineHeight !== undefined ? "/" + ts.lineHeight : ""}${ts.letterSpacing ? " · " + ts.letterSpacing : ""}`, ...(ts.color ? chips([].concat(ts.color)) : []), o.textStyle ? h("div", { class: "mono" }, o.textStyle) : null);
+    }
+    box.append(
+      h("h5", {}, o.name || (o.text ? `«${o.text.slice(0, 40)}»` : o.type)),
+      h("div", { class: "sub mono" }, `${o.type} · ${o.id}`),
+      h("dl", {}, rows),
+      h("button", { class: "btn", onclick: () => copy(`Фрагмент макета «${S.tree.name}» (${S.tree.id}), слой «${o.name || o.type}»:\n\n` + CORE.toMd(o).join("\n") + "\n", "Блок скопирован") }, icon("copy"), "Копировать этот блок"),
+    );
+  }
+  function renderSummary() {
+    const s = CORE.summarize(S.tree);
+    const sw = $("#swatches"); sw.replaceChildren();
+    for (const [c, k] of s.colors.slice(0, 48)) sw.append(h("button", { title: "Скопировать " + c, onclick: () => copy(c, `${c} скопирован`) }, h("i", { style: `background:${c}` }), h("span", {}, c, h("em", {}, "×" + k))));
+    if (!s.colors.length) sw.append(h("p", { class: "empty" }, "Сплошных цветов нет."));
+    const sp = $("#specimens"); sp.replaceChildren();
+    const fams = new Map();
+    (function walk(o) { if (o.textStyle_) { const st = o.textStyle_; const key = `${st.font} ${st.size}` + (st.lineHeight !== undefined ? `/${st.lineHeight}` : ""); if (!fams.has(key)) fams.set(key, { st, text: o.text }); } (o.children || []).forEach(walk); })(S.tree);
+    for (const [key, k] of s.fonts) {
+      const f = fams.get(key); if (!f) continue;
+      sp.append(h("div", {}, h("span", { class: "s", style: `font-family:"${f.st.family}",var(--font-ui);font-weight:${f.st.weight};font-size:${Math.min(f.st.size, 26)}px;line-height:1.25` }, (f.text || "Съешь же ещё").split("\n")[0].slice(0, 40) || "Аа Бб"), h("span", { class: "mono tnum" }, `${key} ×${k}`)));
+    }
+    const cl = $("#comps"); cl.replaceChildren();
+    for (const [c, k] of s.components) cl.append(h("li", {}, h("span", {}, c), h("span", { class: "mono tnum" }, "×" + k)));
+    if (!s.components.length) cl.append(h("li", {}, h("span", {}, "Компонентов нет")));
+    $("#tab-sum-n").textContent = s.colors.length;
+  }
+  function renderStageBar() {
+    $("#st-name").textContent = S.tree.name || S.tree.type;
+    $("#st-crumbs").textContent = `${S.crumbs.join(" / ")} · ${S.tree.id} · ${fmt(S.tree.w)}×${fmt(S.tree.h)}`;
+    $("#demo-badge").hidden = !S.demo;
+  }
+  function renderAll() {
+    renderStageBar(); renderBoard(); renderMd(); renderTree(); renderInspector(); renderSummary(); renderRail();
+    $("#dl").hidden = !(window.self === window.top);
+  }
+
+  // ---------------------------------------------------------------- копирование / скачивание
+  function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 1800); }
+  function copy(text, ok = "Скопировано") {
+    const fallback = () => {
+      const ta = h("textarea", { style: "position:fixed;left:-9999px;top:0" }); ta.value = text; document.body.append(ta); ta.select();
+      let done = false; try { done = document.execCommand("copy"); } catch (_) {}
+      ta.remove(); toast(done ? ok : "Не удалось скопировать — выделите текст вручную");
+    };
+    try { navigator.clipboard.writeText(text).then(() => toast(ok), fallback); } catch (_) { fallback(); }
+  }
+  function download() {
+    try {
+      const a = h("a", { href: URL.createObjectURL(new Blob([S.md], { type: "text/markdown" })), download: `${(S.tree.id || "frame").replace(":", "-")}.md` });
+      document.body.append(a); a.click(); a.remove();
+      toast("Файл сохранён");
+    } catch (_) { toast("Сохранение недоступно — скопируйте текст"); }
+  }
+
+  // ---------------------------------------------------------------- иконки
+  function icon(name) {
+    const P = {
+      upload: "M8 11V2M4.5 5.5 8 2l3.5 3.5M2.5 10.5v3h11v-3",
+      copy: "M5.5 5.5h8v8h-8zM2.5 10.5v-8h8",
+      save: "M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11",
+      caret: "M5 3l5 5-5 5",
+    };
+    const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg");
+    s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "1.6"); s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round"); s.setAttribute("aria-hidden", "true");
+    const p = document.createElementNS(ns, "path"); p.setAttribute("d", P[name]); s.append(p); return s;
+  }
+
+  // ---------------------------------------------------------------- события
+  function init() {
+    document.querySelectorAll("[data-icon]").forEach((el) => el.prepend(icon(el.dataset.icon)));
+    $("#file").addEventListener("change", (e) => { takeFile(e.target.files[0]); e.target.value = ""; });
+    const dz = $("#dropzone");
+    dz.addEventListener("click", () => $("#file").click());
+    dz.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#file").click(); } });
+    let depth = 0;
+    addEventListener("dragenter", (e) => { if (![...e.dataTransfer.types].includes("Files")) return; e.preventDefault(); depth++; $("#dropall").hidden = false; dz.classList.add("over"); });
+    addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
+    addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) { $("#dropall").hidden = true; dz.classList.remove("over"); } });
+    addEventListener("drop", (e) => { e.preventDefault(); depth = 0; $("#dropall").hidden = true; dz.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) takeFile(f); });
+
+    $("#filter").addEventListener("input", (e) => { S.filter = e.target.value; renderRail(); });
+    $("#frame-select").addEventListener("change", (e) => openFrame(e.target.value));
+    document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+    $("#copy-md").addEventListener("click", () => copy(S.md, "Описание скопировано — вставьте его в ГигаКод"));
+    $("#dl").addEventListener("click", download);
+    $("#copy-prompt").addEventListener("click", (e) => { e.preventDefault(); copy($("#prompt-text").textContent, "Промпт скопирован"); });
+    $("#hidden-layers").checked = S.hidden;
+    $("#hidden-layers").addEventListener("change", (e) => { S.hidden = e.target.checked; store.set("hidden", S.hidden); if (!S.demo) openFrame(S.currentId); });
+    $("#zoom").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.z === "fit") S.fit = true; else { S.fit = false; S.zoom = +b.dataset.z; } applyZoom(); });
+
+    const board = $("#board"), hl = $("#hl");
+    board.addEventListener("pointermove", (e) => { const n = e.target.closest(".n"); place(hl, n ? +n.dataset.i : null); });
+    board.addEventListener("pointerleave", () => (hl.hidden = true));
+    board.addEventListener("click", (e) => { const n = e.target.closest(".n"); if (n) { select(+n.dataset.i); } });
+    $("#view").addEventListener("scroll", () => { drawRulers(); hl.hidden = true; }, { passive: true });
+    $("#view").addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); S.fit = false; S.zoom = Math.min(4, Math.max(0.05, +(S.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)).toFixed(3))); applyZoom(); }, { passive: false });
+    addEventListener("keydown", (e) => { if (e.key === "Escape") select(null); });
+    let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(applyZoom, 80); });
+    matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawRulers);
+    new MutationObserver(drawRulers).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+    renderHeader(); setTab(S.tab); renderAll();
+    if (document.fonts) document.fonts.ready.then(() => { applyZoom(); });
+  }
+  init();
+})();
+
+</script>
+
+</body>
+</html>

@@ -141,7 +141,7 @@ def decode_doc(schema, raw):
     S = parse_schema(schema)
     i = raw.find(b"\x28\xb5\x2f\xfd")  # zstd magic
     hdr = raw[:i] if i > 0 else raw[:25]
-    body = zstd_decompress(raw[i:]) if i > 0 and b"ZSTD" in hdr else raw[hdr.find(b"NONE") + 4 + 12:]
+    body = zstd_decompress(raw[i:]) if i > 0 and b"ZSTD" in hdr else raw[raw.find(b"NONE") + 4 + 10:]
     return Decoder(S).decode(R(body), "PixsoMsg")
 
 # ---------------------------------------------------------------- scene model
